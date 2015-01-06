@@ -37,7 +37,7 @@ module_ident_inner = dot ident.
 module_ident_inners = empty.
 module_ident_inners = module_ident_inner module_ident_inners.
 
-
+% Member names: either simple or dotted strings, basically
 membername -> simplemembername.
 membername -> fullmembername.
 
@@ -46,6 +46,9 @@ simplemembername -> protocolname.
 
 fullmembername -> modulename dot simplemembername.
 
+% Module: Top level thing which is parsed.
+% Contains a name, then three classes of things: import declarations,
+% payload type declarations, and protocol declarations.
 module -> moduledecl importdecls payloadtypedecls protocoldecls.
 
 importdecls -> empty.
