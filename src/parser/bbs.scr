@@ -1,0 +1,32 @@
+package tutorial;
+
+type <xsd> "ProductId" from "ProductId.xsd" as ProductID;
+type <xsd> "Calendar" from "Calendar.xsd" as Calendar;
+type <java> "java.lang.Integer" from "rt.jar" as int;
+
+
+global protocol BuyerBrokerSupplier(role Buyer, role Broker, role Supplier) {
+    rec START { // Recursion point for the "Redo" scenario
+        // the common initial four steps
+        query(ProductID) from Buyer to Broker;
+        query(ProductID) from Broker to Supplier;
+        price(int) from Supplier to Broker;
+        price(int) from Broker to Buyer;
+        choice at Buyer { // Buyer decides the protocol scenario to follow
+            // "Redo" scenario
+            redo() from Buyer to Broker;
+            redo() from Broker to Supplier;
+            continue START; // Protocol flow returns to START recursion point
+        } or {
+            // "Accept" scenario
+            accept() from Buyer to Broker;
+            confirm() from Broker to Supplier;
+            date(Calendar) from Supplier to Broker;
+            date(Calendar) from Broker to Buyer;
+        } or {
+            // "Reject" scenario
+            reject() from Buyer to Broker;
+            cancel() from Broker to Supplier;
+        }
+    }
+}
