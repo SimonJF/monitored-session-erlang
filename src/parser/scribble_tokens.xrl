@@ -103,7 +103,7 @@ Rules.
 
 % Identifiers
 {IDENTIFIER} : make_token(ident, TokenLine, TokenChars).
-{EXTIDENTIFIER} : make_token(ident, TokenLine, TokenChars).
+{EXTIDENTIFIER} : make_token(ext_ident, TokenLine, TokenChars).
 
 % Symbols
 {LEFT_BRACE} : make_token(left_brace, TokenLine, TokenChars).
