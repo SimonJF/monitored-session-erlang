@@ -7,16 +7,80 @@
 module(Name, Imports, Payloads, Protocols) ->
   {module, Name, Imports, Payloads, Protocols}.
 
+module_import(Name) ->
+  {module_import, Name}.
+
+module_import(Name, Alias) ->
+  {module_import_alias, Name, Alias}.
+
+member_import(ModuleName, MemberName) ->
+  {member_import, ModuleName, MemberName}.
+
+member_import(ModuleName, MemberName, MemberAlias) ->
+  {member_import_alias, ModuleName, MemberName, MemberAlias}.
+
 % Payload Type
 payload_type(Type, ExternalName, TypeSource, Name) ->
   {payload_type, Type, ExternalName, TypeSource, Name}.
 
 % Global protocols
-global_protocol(Name, Roles, Interactions) ->
-  {global_protocol, Name, Roles, Interactions}.
+global_protocol(Name, Parameters, Roles, Interactions) ->
+  {global_protocol, Name, Parameters, Roles, Interactions}.
 
-message_transfer(SenderRole, ReceiverRoles) ->
-  {message_transfer, SenderRole, ReceiverRoles}.
+global_protocol_instance(Name, Parameters, Roles, InstantiatedProtocol, Arguments, InstantiatedRoles) ->
+  {global_protocol_instance, Name, Roles, InstantiatedProtocol, Arguments, InstantiatedRoles}.
+
+% Weird message signature without an ident and only one payload
+message_signature(Payload) ->
+  {message_signature_payload, Payload}.
+
+% Message signature
+message_signature(Message, Payloads) ->
+  {message_signature, Message, Payloads}.
+
+message_transfer(Message, SenderRole, ReceiverRoles) ->
+  {message_transfer, Message, SenderRole, ReceiverRoles}.
+
+role_decl(Role) ->
+  {role_decl, Role}.
+role_decl(Role, Alias) ->
+  {role_decl_alias, Role, Alias}.
+
+role_instantiation(Name) ->
+  {role_instantiation, Name}.
+
+role_instantiation(Name, Alias) ->
+  {role_instantiation, Name, Alias}.
+
+type_parameter(Name) ->
+  {type_parameter, Name}.
+
+type_parameter(Name, Alias) ->
+  {type_parameter_alias, Name, Alias}.
+
+sig_parameter(Name) ->
+  {sig_parameter, Name}.
+
+sig_parameter_alias(Name, Alias) ->
+  {sig_parameter_alias, Name, Alias}.
+
+arg_message_sig(MessageSig) ->
+  {arg_message_sig, MessageSig}.
+
+arg_message_sig(MessageSig, Alias) ->
+  {arg_message_sig_alias, MessageSig, Alias}.
+
+arg_payload_type(PayloadType) ->
+  {arg_payload_type, PayloadType}.
+
+arg_payload_type(PayloadType, Alias) ->
+  {arg_payload_type, PayloadType, Alias}.
+
+arg_parameter(Parameter) ->
+  {arg_parameter, Parameter}.
+
+arg_parameter(Parameter, Alias) ->
+  {arg_parameter_alias, Parameter, Alias}.
 
 % A choice by the role given by RoleName.
 % Choices is a list of the branches which may be taken, where each
@@ -42,6 +106,9 @@ parallel(ParallelBlocks) ->
 interruptible(InterruptibleBlock, InterruptList) ->
   {interruptible, InterruptibleBlock, InterruptList}.
 
+interruptible(ScopeName, InterruptibleBlock, InterruptList) ->
+  {interruptible_named_scope, ScopeName, InterruptibleBlock, InterruptList}.
+
 % An interrupt consists of multiple messages from a given participant
 % which can interrupt the current flow, meaning that execution continues
 % outside of the scope
@@ -50,4 +117,44 @@ interrupt(Messages, ByRole) ->
 
 % Interesting way of doing subprotocol calls...
 do(Name, RoleInstantiations) ->
-  {do, Name, RoleInstantiations}.
+  {do, Name, [], RoleInstantiations}.
+
+do(Name, ArgList, RoleInstantiations) ->
+  {do, Name, ArgList, RoleInstantiations}.
+
+do_scope(ScopeName, Name, RoleInstantiations) ->
+  {do_scope, ScopeName, Name, [], RoleInstantiations}.
+
+do_scope(ScopeName, Name, ArgList, RoleInstantiations) ->
+  {do_scope, ScopeName, Name, ArgList, RoleInstantiations}.
+
+
+% Local protocol definition
+local_protocol(ProtocolName, ProjRoleName, Params, Roles, Interactions) ->
+  {local_protocol, ProtocolName, ProjRoleName, Params, Roles, Interactions}.
+
+local_protocol_instance(ProtocolName, ProjRoleName, Params, Roles, InstName, Args, InstList} ->
+  {local_protocol_instance, ProtocolName, ProjRoleName, Params, Roles, InstName, Args, InstList}.
+
+
+% Local sends and receives
+local_send(Message, Recipients) ->
+  {local_send, Message, Recipients}.
+
+local_receive(Message, Sender) ->
+  {local_receive, Message, Sender}.
+
+% Local throws and catches
+local_throw(Messages, Recipients) ->
+  {local_throw, Messages, Recipients}.
+
+local_catch(Messages, Sender) ->
+  {local_catch, Messages, Sender}.
+
+% Local interruptible block
+local_interruptible(ScopeName, InterruptibleBlock, LocalCatches) ->
+  {local_interruptible, ScopeName, InterruptibleBlock, LocalCatches}.
+
+% With a throw clause
+local_interruptible(ScopeName, InterruptibleBlock, LocalThrow, LocalCatches) ->
+  {local_interruptible_throw, ScopeName, InterruptibleBlock, LocalThrow, LocalCatches}.
