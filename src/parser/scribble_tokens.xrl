@@ -38,9 +38,8 @@ GREATER_THAN = >
 SYMBOL = {|}|\(|\)|\[|\]|:|/|\\|\.|\#|&|\?|\!|_
 
 % Identifiers
+EXTIDENTIFIER =	"([^\'\"\'])*"
 IDENTIFIER = ([a-zA-Z]|_)([a-zA-Z]|[0-9]|_)*
-IDENTIFIER = ([a-zA-Z]|_)([a-zA-Z]|[0-9]|_)*
-EXTIDENTIFIER =	"([^\\'"'])*"
 
 % Reserved keywords
 MODULEKW = module

@@ -1,4 +1,4 @@
-package tutorial;
+module tutorial;
 
 type <xsd> "ProductId" from "ProductId.xsd" as ProductID;
 type <xsd> "Calendar" from "Calendar.xsd" as Calendar;

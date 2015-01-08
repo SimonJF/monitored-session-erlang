@@ -3,4 +3,4 @@
 -import(yecc, [file/2]).
 
 main() ->
-  yecc:file('scribble_parser', []).
+  yecc:file('scribble_parser', [{verbose, false}]).

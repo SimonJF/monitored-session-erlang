@@ -28,7 +28,7 @@ global_protocol(Name, Parameters, Roles, Interactions) ->
   {global_protocol, Name, Parameters, Roles, Interactions}.
 
 global_protocol_instance(Name, Parameters, Roles, InstantiatedProtocol, Arguments, InstantiatedRoles) ->
-  {global_protocol_instance, Name, Roles, InstantiatedProtocol, Arguments, InstantiatedRoles}.
+  {global_protocol_instance, Name, Parameters, Roles, InstantiatedProtocol, Arguments, InstantiatedRoles}.
 
 % Weird message signature without an ident and only one payload
 message_signature(Payload) ->
@@ -133,7 +133,7 @@ do_scope(ScopeName, Name, ArgList, RoleInstantiations) ->
 local_protocol(ProtocolName, ProjRoleName, Params, Roles, Interactions) ->
   {local_protocol, ProtocolName, ProjRoleName, Params, Roles, Interactions}.
 
-local_protocol_instance(ProtocolName, ProjRoleName, Params, Roles, InstName, Args, InstList} ->
+local_protocol_instance(ProtocolName, ProjRoleName, Params, Roles, InstName, Args, InstList) ->
   {local_protocol_instance, ProtocolName, ProjRoleName, Params, Roles, InstName, Args, InstList}.
 
 
