@@ -31,8 +31,9 @@ global_protocol_instance(Name, Parameters, Roles, InstantiatedProtocol, Argument
   {global_protocol_instance, Name, Parameters, Roles, InstantiatedProtocol, Arguments, InstantiatedRoles}.
 
 % Weird message signature without an ident and only one payload
-message_signature(Payload) ->
-  {message_signature_payload, Payload}.
+% Collapse this into message sig for now
+%message_signature(Payload) ->
+%  {message_signature_payload, Payload}.
 
 % Message signature
 message_signature(Message, Payloads) ->

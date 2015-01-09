@@ -151,7 +151,7 @@ payloadtypedecl -> type_kw less_than identifier greater_than ext_identifier from
   scribble_ast:payload_type(Type, ExternalName, TypeSource, TypeName).
 
 messagesignature -> left_bracket payload right_bracket:
-  scribble_ast:message_signature_payload('$2').
+  scribble_ast:message_signature("", ['$2']).
 messagesignature -> identifier left_bracket right_bracket :
   scribble_ast:message_signature('$1', []).
 messagesignature -> identifier left_bracket payloads right_bracket :
