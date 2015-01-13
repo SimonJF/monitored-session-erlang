@@ -1,4 +1,5 @@
-{'src/*', [debug_info,
+{['src/*', "src/parser/*", "src/monitor/*"],
+					[debug_info,
            {i, "src"},
            {i, "include"},
            {outdir, "ebin"}]}.

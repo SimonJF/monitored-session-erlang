@@ -104,7 +104,7 @@ modulename -> identifier module_ident_inners : '$1' ++ '$2'.
 
 module_ident_inner -> dot identifier : "." ++ '$2'.
 module_ident_inners -> empty : "".
-module_ident_inners -> module_ident_inner module_ident_inners : "." ++ '$1' ++ '$2'.
+module_ident_inners -> module_ident_inner module_ident_inners : '$1' ++ '$2'.
 
 % Member names: either simple or dotted strings, basically
 membername -> simplemembername : '$1'.
@@ -184,7 +184,7 @@ globalprotocolheader -> global_kw protocol_kw identifier roledecllist:
 globalprotocolheader -> global_kw protocol_kw identifier parameterdecllist roledecllist:
   {'$3', '$4', '$5'}.
 
-roledecllist -> left_bracket roledecl roledecllistinner right_bracket.
+roledecllist -> left_bracket roledecl roledecllistinner right_bracket : ['$2'|'$3'].
 roledecllistinner -> empty : [].
 roledecllistinner -> comma roledecl roledecllistinner : ['$2'|'$3'].
 

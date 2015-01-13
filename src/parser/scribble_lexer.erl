@@ -1,8 +1,6 @@
 -module(scribble_lexer).
 -compile(export_all).
 -import(file, [read_file/1]).
--import(scribble_tokens, [string/1]).
--import(scribble_parser, [parse/1]).
 -define(SCRIBBLE_FILE, "bbs.scr").
 
 % Reads a file and converts it from binary to text
@@ -13,25 +11,25 @@ open_file(Filename) ->
     {ok, Binary} -> {ok, unicode:characters_to_list(Binary)}
   end.
 
-
 % Test harness
-main() ->
-  ScribbleFile = open_file(?SCRIBBLE_FILE),
+parse(Filename) ->
+  ScribbleFile = open_file(Filename),
+  % Open the file
   case ScribbleFile of
-    {error, Reason} -> io:format("Error opening file ~s, error: ~s", [?SCRIBBLE_FILE, Reason]);
+    {error, Reason} -> {error, file_open_error, Reason};
     {ok, FileStr} ->
-      io:format("Read file: ~s, with content ~s", [?SCRIBBLE_FILE, FileStr]),
+      % Lexing time
       LexRes = scribble_tokens:string(FileStr),
+      io:format("Tokens: ~p~n", [LexRes]),
       case LexRes of
         {ok, Tokens, _EndLine} ->
-          io:format("Lexed successfully...~n"),
-          io:format("~p~n", [Tokens]),
-          Res = scribble_parser:parse(Tokens),
-          io:format("Parsed successfully! ~p~n", [Res]);
-        {error, Error} -> io:format("Lex error ~p~n", [Error]);
-        _Other -> io:format("Lex error ~n", [])
+          ParseRes = scribble_parser:parse(Tokens),
+          % Finally, parse!
+          case ParseRes of
+            {ok, Res} -> {ok, Res};
+            {error, Err, _} -> {error, parse_error, Err};
+            Other -> {error, parse_error, Other}
+          end;
+        {error, Error} -> {error, lex_error, Error}
       end
   end.
-
-bobsleigh() ->
-  {ok, pines}.
