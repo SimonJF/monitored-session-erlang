@@ -2,6 +2,18 @@
 -compile(export_all).
 -define(LOCAL_PROTOCOL_FILE, "test.scr").
 
+% monitor_gen: Functions for generating and manipulating FSM-based monitors.
+
+% monitor_instance: A monitor instance for a local protocol.
+% Specifies the protocol name, the role to which the protocol has been
+% projected, the current state in the monitor, and the state and transition
+% tables.
+-record(monitor_instance, {protocol_name,
+                           role_name,
+                           current_state = 0,
+                           states,
+                           transitions}).
+
 % Generates a monitor from a Scribble AST.
 %
 
@@ -219,21 +231,48 @@ graphviz_out(States, Transitions) ->
                {} end), {}, Transitions),
   io:format("}", []).
 
-%generate_monitor(LocalProtocol = {local_protocol, _, _, _, _, Interactions}, RunningID, States, Transitions) ->
-%  {}.
-  % Generates a monitor for the local protocol block. This basically involves
-  % doing a fold over the interactions.
-  %lists:foldl(fun (Interaction, {RunningID, Ss, Ts}) ->
-  %                generate_monitor(Interaction, RunningID, Ss, Ts) end,
-  %            RunningID, States, Transitions);
-  %
-% We can't do monitors for other AST constructs (ie global types)
-%generate_monitor(LocalAST, _, _, _) ->
-%  {error, monitor_undefined, LocalAST}.
+create_monitor_instance(ProtocolName, RoleName, States, Transitions) ->
+  #monitor_instance{protocol_name = ProtocolName,
+                    role_name = RoleName,
+                    states = States,
+                    transitions = Transitions}.
 
+% Returns the current monitor node
+current_monitor_node(MonitorInstance) ->
+  CurrentStateNum = MonitorInstance#monitor_instance.current_state,
+  get_state(CurrentStateNum, MonitorInstance).
+
+% Returns [(OutgoingState, OutgoingNode)] from the current state.
+current_outgoing_transitions(MonitorInstance) ->
+  CurrentStateNum = MonitorInstance#monitor_instance.current_state,
+  Transitions = MonitorInstance#monitor_instance.transitions,
+  % If a state has no outgoing transitions, it may not be in the transition table.
+  % That's fine -- just return the empty list.
+  FindResult = orddict:find(CurrentStateNum, Transitions),
+  case FindResult of
+    {ok, TransitionSet} ->
+      TransitionList = sets:to_list(TransitionSet),
+      lists:map(fun(TransitionID) ->
+                    TransitionState = get_state(TransitionID, MonitorInstance),
+                    {TransitionID, TransitionState} end, TransitionList);
+    error -> []
+  end.
+
+get_state(StateNum, MonitorInstance) ->
+  StateTable = MonitorInstance#monitor_instance.states,
+  orddict:fetch(StateNum, StateTable).
+
+
+can_receive(MonitorInfo, Message) ->
+  CurrentMonitorNode = current_monitor_node(MonitorInfo),
+  can_receive(Message, CurrentMonitorNode).
+
+can_send(MonitorInfo, Message) ->
+  CurrentMonitorNode = current_monitor_node(MonitorInfo),
+  can_send(Message, CurrentMonitorNode).
 
 % Checks whether we can send or receive at this point
-can_receive(Message, MonitorNode = {Id, receive_node, Info}) ->
+can_receive_at(Message, MonitorNode = {Id, receive_node, Info}) ->
   {Sender, MessageName, PayloadTypes} = Info,
   CorrectSender = message:message_sender(Message) == Sender,
   CorrectMessageName = message:message_name(Message) == MessageName,
@@ -244,11 +283,11 @@ can_receive(Message, MonitorNode = {Id, receive_node, Info}) ->
     {_, false, _} -> {false, bad_message_name};
     {_, _, false} -> {false, bad_payload_types}
   end;
-can_receive(_Message, MonitorNode) ->
+can_receive_at(_Message, MonitorNode) ->
   {false, bad_node_type, MonitorNode}.
 
 
-can_send(Message, MonitorNode = {Id, send_node, Info}) ->
+can_send_at(Message, MonitorNode = {Id, send_node, Info}) ->
   {Recipients, MessageName, PayloadTypes} = Info,
   CorrectRecipients = lists:sort(Recipients) == lists:sort(message:message_recipients(Message)),
   CorrectMessageName = message:message_name(Message) == MessageName,
@@ -259,6 +298,6 @@ can_send(Message, MonitorNode = {Id, send_node, Info}) ->
     {_, false, _} -> {false, bad_message_name};
     {_, _, false} -> {false, bad_payload_types}
   end;
-can_send(_Message, MonitorNode) ->
+can_send_at(_Message, MonitorNode) ->
   {false, bad_node_type, MonitorNode}.
 
