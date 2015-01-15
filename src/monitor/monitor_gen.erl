@@ -4,16 +4,6 @@
 
 % monitor_gen: Functions for generating and manipulating FSM-based monitors.
 
-% monitor_instance: A monitor instance for a local protocol.
-% Specifies the protocol name, the role to which the protocol has been
-% projected, the current state in the monitor, and the state and transition
-% tables.
--record(monitor_instance, {protocol_name,
-                           role_name,
-                           current_state = 0,
-                           states,
-                           transitions}).
-
 % Generates a monitor from a Scribble AST.
 %
 
@@ -28,17 +18,17 @@ make_node(Id, NodeType, Info) ->
 receive_node(Id, LocalReceive = {local_receive, MessageSig, Sender}) ->
   {message_signature, MessageName, PayloadTypes} = MessageSig,
   Info = {Sender, MessageName, PayloadTypes},
-  make_node(Id, receive_node, Info).
+  make_node(receive_node, Id, Info).
 
 send_node(Id, LocalSend = {local_send, MessageSig, Recipients}) ->
   {message_signature, MessageName, PayloadTypes} = MessageSig,
   Info = {Recipients, MessageName, PayloadTypes},
-  make_node(Id, send_node, Info).
+  make_node(send_node, Id, Info).
 
 choice_node(Id, Choice) ->
-  make_node(Id, choice_node, {}).
+  make_node(choice_node, Id, {}).
 
-end_node(Id) -> make_node(Id, end_node, {}).
+end_node(Id) -> make_node(end_node, Id, {}).
 
 
 % Scopes!
@@ -223,81 +213,11 @@ print_fsm(States, Transitions) ->
                    {} end, {}, Transitions).
 
 graphviz_out(States, Transitions) ->
-  io:format("digraph G {", []),
+  io:format("digraph G {~n", []),
   orddict:fold((fun (S, TSet, _Acc) ->
                    % io:format("~p: ~w~n", [S, sets:to_list(TSet)]),
                    lists:foreach(fun (OutTrans) ->
                                      io:format("~w -> ~w~n", [S, OutTrans]) end, sets:to_list(TSet)),
                {} end), {}, Transitions),
-  io:format("}", []).
-
-create_monitor_instance(ProtocolName, RoleName, States, Transitions) ->
-  #monitor_instance{protocol_name = ProtocolName,
-                    role_name = RoleName,
-                    states = States,
-                    transitions = Transitions}.
-
-% Returns the current monitor node
-current_monitor_node(MonitorInstance) ->
-  CurrentStateNum = MonitorInstance#monitor_instance.current_state,
-  get_state(CurrentStateNum, MonitorInstance).
-
-% Returns [(OutgoingState, OutgoingNode)] from the current state.
-current_outgoing_transitions(MonitorInstance) ->
-  CurrentStateNum = MonitorInstance#monitor_instance.current_state,
-  Transitions = MonitorInstance#monitor_instance.transitions,
-  % If a state has no outgoing transitions, it may not be in the transition table.
-  % That's fine -- just return the empty list.
-  FindResult = orddict:find(CurrentStateNum, Transitions),
-  case FindResult of
-    {ok, TransitionSet} ->
-      TransitionList = sets:to_list(TransitionSet),
-      lists:map(fun(TransitionID) ->
-                    TransitionState = get_state(TransitionID, MonitorInstance),
-                    {TransitionID, TransitionState} end, TransitionList);
-    error -> []
-  end.
-
-get_state(StateNum, MonitorInstance) ->
-  StateTable = MonitorInstance#monitor_instance.states,
-  orddict:fetch(StateNum, StateTable).
-
-
-can_receive(MonitorInfo, Message) ->
-  CurrentMonitorNode = current_monitor_node(MonitorInfo),
-  can_receive(Message, CurrentMonitorNode).
-
-can_send(MonitorInfo, Message) ->
-  CurrentMonitorNode = current_monitor_node(MonitorInfo),
-  can_send(Message, CurrentMonitorNode).
-
-% Checks whether we can send or receive at this point
-can_receive_at(Message, MonitorNode = {Id, receive_node, Info}) ->
-  {Sender, MessageName, PayloadTypes} = Info,
-  CorrectSender = message:message_sender(Message) == Sender,
-  CorrectMessageName = message:message_name(Message) == MessageName,
-  CorrectPayloadTypes = message:message_payload_types(Message) == PayloadTypes,
-  case {CorrectSender, CorrectMessageName, CorrectPayloadTypes} of
-    {true, true, true} -> {true};
-    {false, _, _} -> {false, bad_sender};
-    {_, false, _} -> {false, bad_message_name};
-    {_, _, false} -> {false, bad_payload_types}
-  end;
-can_receive_at(_Message, MonitorNode) ->
-  {false, bad_node_type, MonitorNode}.
-
-
-can_send_at(Message, MonitorNode = {Id, send_node, Info}) ->
-  {Recipients, MessageName, PayloadTypes} = Info,
-  CorrectRecipients = lists:sort(Recipients) == lists:sort(message:message_recipients(Message)),
-  CorrectMessageName = message:message_name(Message) == MessageName,
-  CorrectPayloadTypes = message:message_payload_types(Message) == PayloadTypes,
-  case {CorrectRecipients, CorrectMessageName, CorrectPayloadTypes} of
-    {true, true, true} -> {true};
-    {false, _, _} -> {false, bad_recipients};
-    {_, false, _} -> {false, bad_message_name};
-    {_, _, false} -> {false, bad_payload_types}
-  end;
-can_send_at(_Message, MonitorNode) ->
-  {false, bad_node_type, MonitorNode}.
+  io:format("}~n", []).
 
