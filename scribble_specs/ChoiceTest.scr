@@ -1,0 +1,23 @@
+module src.com.simonjf.scribbletest.ChoiceTest;
+
+global protocol ChoiceTest(role Role1, role Role2) {
+	Hello() from Role1 to Role2;
+	World() from Role2 to Role1;
+	choice at Role1 {
+		Wassup() from Role1 to Role2;
+		HowsItGoing() from Role2 to Role1;
+		NotBadTa() from Role1 to Role2;
+	} or {
+		Hello() from Role1 to Role2;
+		AmIInTrouble() from Role2 to Role1;
+		Yes() from Role1 to Role2;
+		Why() from Role2 to Role1;
+		choice at Role1 {
+			BrokeTheBuild() from Role1 to Role2;
+		} or {
+			AteOtherPeoplesFood() from Role1 to Role2;
+		}
+		OkayFairEnough() from Role2 to Role1;
+	}
+	CheerioOlChap() from Role1 to Role2;
+}

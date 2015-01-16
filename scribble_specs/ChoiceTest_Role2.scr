@@ -1,0 +1,23 @@
+module src.com.simonjf.scribbletest.ChoiceTest_Role2;
+
+local protocol ChoiceTest at Role2(role Role1,role Role2) {
+	Hello() from Role1;
+	World() to Role1;
+	choice at Role1 {
+		Wassup() from Role1;
+		HowsItGoing() to Role1;
+		NotBadTa() from Role1;
+	} or {
+		Hello() from Role1;
+		AmIInTrouble() to Role1;
+		Yes() from Role1;
+		Why() to Role1;
+		choice at Role1 {
+			BrokeTheBuild() from Role1;
+		} or {
+			AteOtherPeoplesFood() from Role1;
+		}
+		OkayFairEnough() to Role1;
+	}
+	CheerioOlChap() from Role1;
+}
