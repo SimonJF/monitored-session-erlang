@@ -12,8 +12,8 @@
 % information.
 %
 
-make_node(Id, NodeType, Info) ->
-  {node, Id, NodeType, Info}.
+make_node(NodeType, Id, Info) ->
+  {NodeType, Id, Info}.
 
 receive_node(Id, LocalReceive = {local_receive, MessageSig, Sender}) ->
   {message_signature, MessageName, PayloadTypes} = MessageSig,

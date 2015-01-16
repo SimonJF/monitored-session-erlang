@@ -94,7 +94,12 @@ filter_outgoing_transitions(InteractionType, NodeType, Message, MonitorNode, Pre
   lists:filtermap(fun(Node) ->
       if element(1, (Node)) == NodeType ->
            case PredicateFunction(Message, Node) of
-             true -> {true, next_node(InteractionType, Message, Node, MonitorInstance)};
+             true ->
+               NNRes = next_node(InteractionType, Message, Node, MonitorInstance),
+               case NNRes of
+                 {ok, NN} -> {true, NN};
+                 _Other -> false
+               end;
              {false, Error} -> false
            end;
          % If not, don't include
@@ -105,12 +110,12 @@ filter_outgoing_transitions(InteractionType, NodeType, Message, MonitorNode, Pre
 
 % Gets the next node, given an interaction type, message, monitor node, and monitor instance.
 % This will either be {ok, Node} or {error , Error}
-next_node(_InteractionType, Message, MonitorNode = {receive_node, Id, Info}, MonitorInstance) ->
+next_node(recv, Message, MonitorNode, MonitorInstance) ->
   transition_next_node(Message,
                        MonitorNode,
                        can_receive_at(Message, MonitorNode, MonitorInstance),
                        MonitorInstance);
-next_node(_InteractionType, Message, MonitorNode = {send_node, Id, Info}, MonitorInstance) ->
+next_node(send, Message, MonitorNode, MonitorInstance) ->
   transition_next_node(Message,
                        MonitorNode,
                        can_send_at(Message, MonitorNode, MonitorInstance),
@@ -135,8 +140,9 @@ next_node(InteractionType, Message, MonitorNode = {choice_node, Id, _Info}, Moni
                                                     MonitorNode,
                                                     PredicateFunction,
                                                     MonitorInstance),
-  check_transition_list(FilteredTransitions).
-
+  check_transition_list(FilteredTransitions);
+next_node(_IT, _Msg, _MN, _MI) ->
+  {error, bad_node}.
 
 % Checks whether we can send or receive at this point
 can_receive_at(Message, MonitorNode = {receive_node, Id, Info}, MonitorInstance) ->
@@ -162,22 +168,24 @@ can_receive_at(Message, MonitorNode = {choice_node, Id, _Info}, MonitorInstance)
                                                     MonitorInstance),
   lists:length(OutgoingTransitions) == 1;
 can_receive_at(_Message, MonitorNode, _MonitorInstance) ->
-  {false, bad_node_type, MonitorNode}.
+  {false, bad_node_type}.
 
 
 can_send_at(Message, MonitorNode = {send_node, Id, Info}, MonitorInstance) ->
+  io:format("can_send_at called, node: ~p~n", [MonitorNode]),
   {Recipients, MessageName, PayloadTypes} = Info,
   CorrectRecipients = lists:sort(Recipients) == lists:sort(message:message_recipients(Message)),
   CorrectMessageName = message:message_name(Message) == MessageName,
   CorrectPayloadTypes = message:message_payload_types(Message) == PayloadTypes,
   case {CorrectRecipients, CorrectMessageName, CorrectPayloadTypes} of
-    {true, true, true} -> {true};
+    {true, true, true} -> true;
     {false, _, _} -> {false, bad_recipients};
     {_, false, _} -> {false, bad_message_name};
     {_, _, false} -> {false, bad_payload_types}
   end;
 can_send_at(_Message, MonitorNode, MonitorInstance) ->
-  {false, bad_node_type, MonitorNode}.
+  io:format("can_send_at called, node: ~p~n", [MonitorNode]),
+  {false, bad_node_type}.
 
 
 % Checks a message given an interaction type, message, and monitor instance
@@ -188,15 +196,24 @@ check_message(InteractionType, Message, MonitorInstance) ->
   NextNodeResult = next_node(InteractionType, Message, CurrentNode, MonitorInstance),
   case NextNodeResult of
     {ok, NextNode = {_NodeType, Id, _Info}} ->
-      NewMonitorInstance = MonitorInstance#monitor_instance{current_state=Id};
+      NewMonitorInstance = MonitorInstance#monitor_instance{current_state=Id},
+      {ok, NewMonitorInstance};
     {error, Error} -> {error, Error, MonitorInstance}
   end.
 
+is_ended(MonitorInstance) ->
+  CurrentMonitorNode = current_monitor_node(MonitorInstance),
+  case CurrentMonitorNode of
+    {end_node, _, _} -> true;
+    _Other -> false
+  end.
 
-% Checks whether a given message can be sent, given the current monitor state
+% Checks whether a given message can be sent, given the current monitor state,
+% and advance the monitor state
 send(Message, MonitorInstance) ->
   check_message(send, Message, MonitorInstance).
 
-% Checks whether a given message can be received, given the current monitor state
+% Checks whether a given message can be received, given the current monitor state,
+% and advance the monitor state
 recv(Message, MonitorInstance) ->
   check_message(recv, Message, MonitorInstance).

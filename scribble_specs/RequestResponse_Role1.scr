@@ -1,0 +1,6 @@
+module src.com.simonjf.scribbletest.RequestResponse_Role1;
+
+local protocol RequestResponse at Role1(role Role1,role Role2) {
+	Request() to Role2;
+	Response() from Role2;
+}

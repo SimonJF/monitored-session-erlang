@@ -11,7 +11,7 @@ open_file(Filename) ->
     {ok, Binary} -> {ok, unicode:characters_to_list(Binary)}
   end.
 
-% Test harness
+% Lex and parse a file
 parse(Filename) ->
   ScribbleFile = open_file(Filename),
   % Open the file
@@ -20,7 +20,6 @@ parse(Filename) ->
     {ok, FileStr} ->
       % Lexing time
       LexRes = scribble_tokens:string(FileStr),
-      io:format("Tokens: ~p~n", [LexRes]),
       case LexRes of
         {ok, Tokens, _EndLine} ->
           ParseRes = scribble_parser:parse(Tokens),
