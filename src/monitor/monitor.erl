@@ -2,6 +2,7 @@
 -compile(export_all).
 
 % monitor.erl: Functions for manipulating monitors.
+% The monitor runtime, and some public-facing API functions to load them in.
 
 % monitor_instance: A monitor instance for a local protocol.
 % Specifies the protocol name, the role to which the protocol has been
@@ -12,6 +13,21 @@
                            current_state = 0,
                            states,
                            transitions}).
+
+% Public-facing API to create a monitor instance for the given Scribble
+% file, protocol name, and role name.
+create_monitor(ScribbleFile, ProtocolName, RoleName) ->
+  ParseResult = scribble_lexer:parse(ScribbleFile),
+  case ParseResult of
+    {ok, AST} ->
+      MonitorResult = monitor_gen:generate_monitor_for(AST, ProtocolName, RoleName),
+      case MonitorResult of
+        {ok, {_RID, States, Transitions}} ->
+          {ok, create_monitor_instance(ProtocolName, RoleName, States, Transitions)};
+        Other -> Other
+      end;
+    Other -> Other
+  end.
 
 % Creates a monitor instance given a protocol name, role name,
 % and state and transition tables
@@ -98,7 +114,7 @@ next_node(_InteractionType, Message, MonitorNode = {send_node, Id, Info}, Monito
   transition_next_node(Message,
                        MonitorNode,
                        can_send_at(Message, MonitorNode, MonitorInstance),
-                       MonitorInstance).
+                       MonitorInstance);
 next_node(InteractionType, Message, MonitorNode = {choice_node, Id, _Info}, MonitorInstance) ->
   % - In case of sends, filter send nodes; converse for receive nodes
   % - Filter valid ones

@@ -71,6 +71,8 @@ node_type(_Other) -> io:format("Other: ~p~n", [_Other]),
                      other.
 
 
+% Internal quick 'n' easy test harness
+% Will probably delete this at some point
 test_fsm(Filename) ->
   ParseResult = scribble_lexer:parse(Filename),
   case ParseResult of
@@ -110,6 +112,28 @@ generate_module_monitors(AST) ->
   {error, not_a_module}.
 
 
+generate_monitor_for(AST = {module, _Name, _Imports, _Payloads, Protocols},
+                     ProtocolName, RoleName) ->
+  FilteredList =
+    lists:filter(fun (Protocol) ->
+                     % First, only work with local protocols
+                     case Protocol of
+                       {local_protocol, PName, RName, _, _, _} ->
+                         (PName == ProtocolName) and (RName == RoleName);
+                       _Other -> false
+                     end end, Protocols),
+  case FilteredList of
+    [] -> {error, no_matching_protocol};
+    [X] -> {ok, generate_monitor(X)};
+    [X|XS] ->
+      % Really, there shouldn't be more than one. We could error out,
+      % but here I'll just warn and opt to take the first.
+      % I am a gracious god.
+      io:format("WARN: Multiple matching monitors for ~s:~s~n", [ProtocolName, RoleName]),
+      {ok, generate_monitor(X)}
+  end.
+
+
 % Generates a monitor from a local protocol. Only works with a local protocol definition!
 generate_monitor(LocalAST = {local_protocol, ProtocolName, ProjRoleName, Params, Roles, Block}) ->
   Size = block_size(Block),
@@ -119,9 +143,9 @@ generate_monitor(LocalAST = {local_protocol, ProtocolName, ProjRoleName, Params,
 
 calculate_next_index([], RunningID, _EndIndex) ->
   RunningID;
-calculate_next_index([X], _RunningID, EndIndex) ->
+calculate_next_index([_X], _RunningID, EndIndex) ->
   EndIndex;
-calculate_next_index([X|XS], RunningID, _EndIndex) ->
+calculate_next_index([_X|_XS], RunningID, _EndIndex) ->
   RunningID + 1.
 
 add_transition(From, To, TransitionTable) ->
