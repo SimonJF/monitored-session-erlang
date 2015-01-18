@@ -86,14 +86,14 @@ transition_next_node(Message, MonitorNode, PredicateResult, MonitorInstance) ->
 % InteractionType is the type of interaction -- so send or receive
 % NodeType is the node type (send_node, receive_node, or choice_node in this case)
 % Message is the message to be sent
-% MonitorNode is the current monitor node
+% MonitorNode is the current monitor node (probably a choice node)
 % PredicateFunction is the function to check a message
 % MonitorInstance is the current monitor instance
 filter_outgoing_transitions(InteractionType, NodeType, Message, MonitorNode, PredicateFunction, MonitorInstance) ->
   % Check whether each possible outgoing transition is actually one we could take
   lists:filtermap(fun(Node) ->
       if element(1, (Node)) == NodeType ->
-           case PredicateFunction(Message, Node) of
+           case PredicateFunction(Message, Node, MonitorInstance) of
              true ->
                NNRes = next_node(InteractionType, Message, Node, MonitorInstance),
                case NNRes of
@@ -110,16 +110,6 @@ filter_outgoing_transitions(InteractionType, NodeType, Message, MonitorNode, Pre
 
 % Gets the next node, given an interaction type, message, monitor node, and monitor instance.
 % This will either be {ok, Node} or {error , Error}
-next_node(recv, Message, MonitorNode, MonitorInstance) ->
-  transition_next_node(Message,
-                       MonitorNode,
-                       can_receive_at(Message, MonitorNode, MonitorInstance),
-                       MonitorInstance);
-next_node(send, Message, MonitorNode, MonitorInstance) ->
-  transition_next_node(Message,
-                       MonitorNode,
-                       can_send_at(Message, MonitorNode, MonitorInstance),
-                       MonitorInstance);
 next_node(InteractionType, Message, MonitorNode = {choice_node, Id, _Info}, MonitorInstance) ->
   % - In case of sends, filter send nodes; converse for receive nodes
   % - Filter valid ones
@@ -131,8 +121,8 @@ next_node(InteractionType, Message, MonitorNode = {choice_node, Id, _Info}, Moni
   %Elem = Value = term()
   {NodeType, PredicateFunction} =
     case InteractionType of
-      send -> {send_node, fun monitor_gen:can_send_at/3};
-      recv -> {receive_node, fun monitor_gen:can_receive_at/3}
+      send -> {send_node, fun monitor:can_send_at/3};
+      recv -> {receive_node, fun monitor:can_receive_at/3}
     end,
   FilteredTransitions = filter_outgoing_transitions(InteractionType,
                                                     NodeType,
@@ -141,6 +131,16 @@ next_node(InteractionType, Message, MonitorNode = {choice_node, Id, _Info}, Moni
                                                     PredicateFunction,
                                                     MonitorInstance),
   check_transition_list(FilteredTransitions);
+next_node(recv, Message, MonitorNode, MonitorInstance) ->
+  transition_next_node(Message,
+                       MonitorNode,
+                       can_receive_at(Message, MonitorNode, MonitorInstance),
+                       MonitorInstance);
+next_node(send, Message, MonitorNode, MonitorInstance) ->
+  transition_next_node(Message,
+                       MonitorNode,
+                       can_send_at(Message, MonitorNode, MonitorInstance),
+                       MonitorInstance);
 next_node(_IT, _Msg, _MN, _MI) ->
   {error, bad_node}.
 
