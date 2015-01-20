@@ -80,4 +80,34 @@ In the case of **supervised** session actors:
 
 ### Updating Conversation States when an Actor is Restarted
 
-  * When an actor dies, 
+  * When an actor dies, it automatically takes down all processes that
+    it supervises, and so on.
+
+  * We need some kind of "hook" on each actor, which notifies the
+    conversation runtime when the actor goes down.
+    * Either supervised by some root supervisor, or the supervision
+      logic we implement for the actor supervisors should send the
+      runtime a message.
+
+  * The conversation runtime then needs to:
+    * Pause the conversation, as the mapping is now inconsistent?
+      * Messages may already have been sent. We will need to compensate
+        for this somehow...
+    * Identify the roles that the actor provided
+    * Identify the conversations in which the actor took part
+    * Invite new actors to participate in the conversation, to
+      take the new roles.
+    * Resume the conversation.
+
+  * Recall that the failure of a supervisor means that the entirety of
+    its supervised processes also get killed. This would then mean that
+    we'd have to have to get a set of killed processes and do the same
+    for all of them.
+
+### Why are we doing this?
+
+Crisis of faith just occurred: why? In a normal system, wouldn't we just
+abort all conversations and restart? Wouldn't that be far more sensible?
+
+* Long-running conversations which need to persist over the lifetime of
+  the application, regardless of failures of some actors
