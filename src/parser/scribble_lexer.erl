@@ -1,19 +1,10 @@
 -module(scribble_lexer).
 -compile(export_all).
 -import(file, [read_file/1]).
--define(SCRIBBLE_FILE, "bbs.scr").
-
-% Reads a file and converts it from binary to text
-open_file(Filename) ->
-  OpenResult = file:read_file(Filename),
-  case OpenResult of
-    {error, Reason} -> {error, Reason};
-    {ok, Binary} -> {ok, unicode:characters_to_list(Binary)}
-  end.
 
 % Lex and parse a file
 parse(Filename) ->
-  ScribbleFile = open_file(Filename),
+  ScribbleFile = util:open_file(Filename),
   % Open the file
   case ScribbleFile of
     {error, Reason} -> {error, file_open_error, Reason};
