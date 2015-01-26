@@ -1,4 +1,4 @@
--module(protocol_registry).
+-module(actor_type_registry).
 -behaviour(gen_server).
 -compile(export_all).
 
@@ -26,18 +26,52 @@ spawn_children(ActorTypes) ->
               ActorTypes).
 
 
+% Gets the PID for an actor type process with the given name
+get_actor_type_pid(ActorTypeName, ActorTypeRegistry) ->
+  orddict:find(ActorTypeName, ActorTypeRegistry).
+
+
+% Resolves an actor type to a PID, and relays the given message.
+% Returns either ok, or {error, error details}
+actor_type_call(ActorTypeName, Message, ActorTypeRegistry) ->
+  case get_actor_type_pid(ActorTypeName, ActorTypeRegistry) of
+    {ok, ActorInstancePid} ->
+      gen_server:call(ActorInstancePid, Message),
+      ok;
+    Other -> {error, actor_type_not_registered}
+  end.
+
+
+handle_register_actor(ActorTypeName, ActorInstancePid, ActorTypeRegistry) ->
+  actor_type_call(ActorTypeName,
+                  {register_actor, ActorInstancePid},
+                  ActorTypeRegistry).
+
+handle_deregister_actor(ActorTypeName, ActorInstancePid, ActorTypeRegistry) ->
+  actor_type_call(ActorTypeName,
+                  {deregister_actor, ActorInstancePid},
+                  ActorTypeRegistry).
+
 %% OTP Callback Functions
 
 % Spawn processes for each of the protocol names
-init([ProtocolMappings]) ->
-  ActorTypeRegistry = spawn_children(ProtocolMappings),
+init([ActorTypes]) ->
+  ActorTypeRegistry = spawn_children(ActorTypes),
   {ok, ActorTypeRegistry}.
 
 handle_call({get_process_id, ActorTypeName}, From, ActorTypeRegistry) ->
   % Try and find the protocol name in the dictionary, returning either
   % {ok, Pid} or error
-  Result = orddict:find(ActorTypeName, ActorTypeRegistry),
+  Result = get_actor_type_pid(ActorTypeName, ActorTypeRegistry),
   {reply, Result, ActorTypeRegistry};
+handle_call({register_actor, ActorType, ActorInstancePid}, From, ActorTypeRegistry) ->
+  handle_register_actor(ActorType, ActorInstancePid, ActorTypeRegistry),
+  {noreply, ActorTypeRegistry};
+handle_call({deregister_actor, ActorType, ActorInstancePid}, From, ActorTypeRegistry) ->
+  handle_deregister_actor(ActorType, ActorInstancePid, ActorTypeRegistry),
+  {noreply, ActorTypeRegistry};
+
+
 handle_call(Other, _From, ActorTypeRegistry) ->
   error_logger:error_msg("Unknown call message in ActorTypeRegistry: ~p~n", [Other]),
   {noreply, ActorTypeRegistry}.
@@ -55,3 +89,4 @@ handle_info(Other, ActorTypeRegistry) ->
 % Don't need this
 code_change(_PV, ActorTypeRegistry, _Ex) ->
   {ok, ActorTypeRegistry}.
+
