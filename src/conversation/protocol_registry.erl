@@ -1,6 +1,6 @@
 -module(protocol_registry).
 -behaviour(gen_server).
-
+-compile(export_all).
 
 %%% Registry for protocol processes.
 %%% Maps protocol names to protocol processes.
@@ -64,6 +64,9 @@ handle_cast(Other, ProtocolRegistry) ->
 handle_info(Other, ProtocolRegistry) ->
   error_logger:error_msg("Unknown info message in ProtocolRegistry: ~p~n", [Other]),
   {noreply, ProtocolRegistry}.
+
+terminate(Reason, _ProtocolRegistry) ->
+  error_logger:error_msg("ERROR: Process registry terminated.~n").
 
 % Don't need this
 code_change(_PV, ProtocolRegistry, _Ex) ->

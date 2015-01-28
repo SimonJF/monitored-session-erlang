@@ -90,3 +90,8 @@ handle_info(Other, ActorTypeRegistry) ->
 code_change(_PV, ActorTypeRegistry, _Ex) ->
   {ok, ActorTypeRegistry}.
 
+terminate(Reason, _State) ->
+  error_logger:error_msg("ERROR: Actor type registry terminating because of reason ~p~n.",
+                         [Reason]),
+  ok.
+

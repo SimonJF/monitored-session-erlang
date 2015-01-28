@@ -15,3 +15,4 @@ message_recipients(_Msg = {message, _, _, RecipientRoles, _, _, _}) -> Recipient
 message_name(_Msg = {message, _, _, _, MessageName, _, _}) -> MessageName.
 message_payload_types(_Msg = {message, _, _, _, _, PayloadTypes, _}) -> PayloadTypes.
 message_payload(_Msg = {message, _, _, _, _, _, Payload}) -> Payload.
+

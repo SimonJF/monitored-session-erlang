@@ -1,8 +1,7 @@
 -module(session_actor).
-
--export([behaviour_info/1]).
 -behaviour(gen_server).
 
+-compile(export_all).
 -record(actor_state, {actor_type_name,
                       monitor_pid,
                       actor_module,

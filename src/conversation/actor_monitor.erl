@@ -1,7 +1,7 @@
 -module(actor_monitor).
 
 -behaviour(gen_fsm).
-
+-compile(export_all).
 -record(conv_state, {actor_pid, % PID of the attached actor
                      actor_type_name, % Name of the actor type
                      conversation_id, % Conversation ID
@@ -331,4 +331,34 @@ setup(Msg, StateData) ->
 % It's also possible to terminate the conversation at this point, nuking the
 % conversation state and going back to idle.
 working(Msg = {message, MessageData}, StateData) ->
-  handle_incoming_message(Msg, StateData).
+  handle_incoming_message(Msg, StateData),
+  % Remain in the working state.
+  {next_state, working, StateData}.
+
+
+% Remaining uninteresting (yet required) OTP callbacks
+handle_info(Info, StateName, StateData) ->
+  error_logger:warning_msg("WARN: Monitor got info messsage ~p"
+                            ++ " in state ~p: ignoring. ~n", [Info, StateName]),
+  {next_state, StateName, StateData}.
+
+handle_event(Event, StateName, StateData) ->
+  error_logger:warning_msg("WARN: Monitor got synchronous event messsage ~p"
+                            ++ " in state ~p: ignoring. ~n", [Event, StateName]),
+  {next_state, StateName, StateData}.
+
+
+handle_sync_event(Event, _From, StateName, StateData) ->
+  error_logger:warning_msg("WARN: Monitor got asynchronous event messsage ~p"
+                            ++ " in state ~p: ignoring. ~n", [Event, StateName]),
+  {next_state, StateName, StateData}.
+
+code_change(OldVersion, StateName, StateData, _Extra) ->
+  {ok, StateName, StateData}.
+
+terminate(Reason, _StateName, StateData) ->
+  error_logger:error_msg("ERROR: Monitor for actor of type ~w (monitor PID ~p) " ++
+                         "terminating because of reason ~p",
+                         [StateData#conv_state.actor_type_name, self(), Reason]),
+
+  ok.
