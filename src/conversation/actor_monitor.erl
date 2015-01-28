@@ -1,88 +1,70 @@
 -module(actor_monitor).
 
--behaviour(gen_fsm).
+-behaviour(gen_server).
 -compile(export_all).
+% -record(conv_state, {actor_pid, % PID of the attached actor
+%                      actor_type_name, % Name of the actor type
+%                      conversation_id, % Conversation ID
+%                      available_roles, % Roles the actor has the ability to play
+%                      conversation_roles, % Roles the actor is playing in the conversation
+%                      monitors, % Set of monitors
+%                      active_role}). % Currently-active role
+
 -record(conv_state, {actor_pid, % PID of the attached actor
-                     actor_type_name, % Name of the actor type
-                     conversation_id, % Conversation ID
-                     available_roles, % Roles the actor has the ability to play
-                     conversation_roles, % Roles the actor is playing in the conversation
-                     monitors, % Set of monitors
-                     active_role}). % Currently-active role
-
-% Note that the state of the actual actor (ie, what's passed to it whenever
-% a message is received / operation is called, etc) is contained in the
-% actual actor itself.
-
-% Actor monitor. Contains the per-conversation state of the session actor.
-% All messages go through this process, prior to being forwarded to the
-% session actor itself.
-
-% Session actor workflow. This is all system-y stuff, so is handled by the
-% monitor process.
-%
-% Workflow:
-%  * Listen for invitation messages.
-%    * Actors can be invited for multiple roles. This means we've got
-%      to treat this a bit like an FSM:
-%        Idle -> Setup -> Working -> Idle, where...
-%          - Idle is when the actor is not active in any conversation;
-%          - Setup is entered when the first invitation message is received,
-%            and waits for either further invitation messages *from the same CID*
-%            or for a system message indicating that the conversation setup is
-%            complete -- this will be sent by the protocol actor when all roles
-%            have been fulfilled. This transitions us into the working state...
-%          - Working is the state in which the Actual Communication occurs...
-%          - And finally, once the conversation is over, we clear the
-%            conversation-specific state and go back to the idle state.
-%            How do we know it's over? When both monitors are in final states?
-%            Do we wait on a message from the protocol process?
-%
-%    Idle State
-%    ==========
-%    When an invitation message is received and we're in the idle state, then
-%    we need to do the Conversation Setup. This is...
-%
-%      * Create conversation state with conversation ID contained in invite msg
-%      * Do role setup
-%
-%      Role Setup
-%      ----------
-%        * Add the role to which we've been invited into the CurrentRoles list
-%        * Retrieve the monitor for the role from the protocol / actor type process
-%        * Add the new monitor into the Role |-> Monitor mapping
-%
-%    Setup State
-%    ===========
-%    In this state, we await more role invitation messages.
-%      * If we get a role invitation message for a conversation we're already in,
-%        for a role we've not fulfilled, then we'll need to do the role setup for
-%        that particular role.
-%      * If we've fulfilled that role already, {error, role_already_fulfilled}
-%         - This shouldn't really happen; it's more an internal error
-%      * If it's for a different conversation, {error, already_occupied}
-%         - If this happens, then that's fine -- it just means that the protocol
-%           actor should delegate this invitation to a different actor instance instead.
-%
-%    Once the protocol instance has populated all roles with actor instances, then
-%    we'll be needing to transition into the Working state.
-%
-%    Working State
-%    =============
-%    The working state is the main body of the conversation logic. This means that
-%    we'll be carrying out the main communication here.
-%    If we're the conversation initiator, the protocol process will send us a start_protocol
-%    system message, which will set the active role and call the first_message callback.
-%
-%    We first check to see whether the message that has been received is a system message.
-%    If so, then we'll need to handle that and go back to the start.
-%
-%    If not then we'll check the incoming message against the monitor.
+                     actor_type_name, % Name of the attached actor type
+                     active_protocols, % Protocols which we're currently involved in
+                     registered_roles, % Roles for each protocol
+                     monitors, % Monitors for each role we play in each protocol
+                     current_protocol}). % The currently-active protocol.
 
 
-
-
-%% OTP Callbacks for gen_fsm.
+% TODO:::::
+% I've misunderstood this a bit, and am going to have to make a few changes.
+% Basically, we can be involved with multiple protocols, but only one role
+% in each.
+% This will change the FSM / state a fair bit.
+%
+% Instead, we should always wait for synchronous invitation messages in
+% whichever state we're in, and accept if we're not involved in that
+% protocol type already.
+%
+% Really, we should move from gen_fsm to gen_server.
+% Each actor can only play one role per protocol, but can partake in multiple
+% protocols. This means that basically what we'll have to do is change
+% available_roles to available_protocols, where each entry is a
+% {ProtocolName, RoleName} pair.
+%
+% New state:
+% Actor PID (as before)
+% Actor type name (as before)
+% Protocol |-> Conversation ID mapping (as we can be involved in mult protocols)
+% Protocol |-> Role mapping (where Role is the role we can play in a protocol)
+% Monitors (Protocol |-> Monitor Instance)
+% Active protocol
+%
+% New workflow:
+% Always handle conversation invitation messages.
+%  - Accept if we're not involved in a protocol of that type.
+%  - Reject if we're not registered to partake in that protocol.
+%
+% Always handle conversation termination messages, removing from active
+% conversation list.
+%
+% What to do when we get a message for a role that's not currently active?
+% In the paper, it's scheduled co-operatively, meaning only one can be active at
+% once. I don't know why though. As a temp thing, we could just ignore them, and
+% mark it as a fixme, at least until we get the very basic scaffolding going.
+%
+% New architecture for actor_monitor: use a gen_server instead of a gen_fsm, as
+% we no longer have to differentiate between the idle / setup / working states.
+% As soon as we respond to the invitation message, we can partake in interactions
+% for the registered conversation ID.
+%
+%
+% Work for tomorrow!
+%  - Implement the above plan for actor_monitor
+%  - Figure out what needs to be changed in session_actor, and do those
+%  - Get monitor loading / storage / resets going. What stores what?
 
 fresh_state(ActorPid, ActorTypeName, AvailableRoles) ->
   #conv_state{actor_pid=ActorPid,
@@ -333,7 +315,9 @@ setup(Msg, StateData) ->
 working(Msg = {message, MessageData}, StateData) ->
   handle_incoming_message(Msg, StateData),
   % Remain in the working state.
-  {next_state, working, StateData}.
+  {next_state, working, StateData};
+working({terminate_conversation, ConvID}, StateData) ->
+  handle_terminate_conversation(ConvID, working, StateData).
 
 
 % Remaining uninteresting (yet required) OTP callbacks
