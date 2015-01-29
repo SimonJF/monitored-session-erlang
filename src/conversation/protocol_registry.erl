@@ -71,3 +71,4 @@ terminate(Reason, _ProtocolRegistry) ->
 % Don't need this
 code_change(_PV, ProtocolRegistry, _Ex) ->
   {ok, ProtocolRegistry}.
+

@@ -50,9 +50,35 @@ fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap) ->
               monitors=orddict:new(), % Monitors for each role we play in each protocol
               current_protocol=undefined}. % The currently-active protocol.
 
+load_monitors([], MonitorDict, _) ->
+  MonitorDict;
+load_monitors([{ProtocolName, RoleName}|XS], MonitorDict, ActorName) ->
+  MonitorRes = conversation:get_monitor(ProtocolName, RoleName),
+  case MonitorRes of
+    {ok, Monitor} -> NewDict = orddict:store(ProtocolName, Monitor, MonitorDict),
+                     load_monitors(XS, NewDict, ActorName);
+    {error, bad_protocol_name} ->
+      error_logger:warning_msg("WARN: Actor ~w could not load monitor for " ++
+                               "protocol ~w: bad protocol name.~n",
+                               [ActorName, ProtocolName]),
+      load_monitors(XS, MonitorDict, ActorName);
+    {error, bad_role_name} ->
+      error_logger:warning_msg("WARN: Actor ~w could not load monitor for " ++
+                               "protocol ~w: bad role name (~w).~n",
+                               [ActorName, ProtocolName, RoleName]),
+      load_monitors(XS, MonitorDict, ActorName)
+  end.
+
 % Initialises the basic monitor state with some default values.
 init([ActorPid, ActorTypeName, ProtocolRoleMap]) ->
-  {ok, fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap)}.
+  % Firstly, create a fresh state with all of the information we've been given
+  State = fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap),
+  % Next, we load the monitors.
+  MonitorDict = load_monitors(orddict:to_list(ProtocolRoleMap),
+                              orddict:new(),
+                              ActorTypeName),
+
+  {ok, State#conv_state{monitors=MonitorDict}}.
 
 
 % Called when we've been invited to fufil a role.
@@ -200,8 +226,6 @@ handle_incoming_message(Other, _CID, StateData) ->
 % Synchronous messages:
 %  * Invitation
 %  * Termination
-%  handle_invitation(ProtocolName, RoleName, ConversationID, StateData) ->
-%  handle_terminate_conversation(ConversationID, CurrentState, State)
 handle_call({invitation, ProtocolName, RoleName, ConversationID}, _Sender, State) ->
   handle_invitation(ProtocolName, RoleName, ConversationID, State);
 handle_call({terminate_conversation, ConversationID}, _Sender, State) ->

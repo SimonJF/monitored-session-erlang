@@ -29,3 +29,22 @@ register_actor_instance(ActorType, ActorPid) ->
 deregister_actor_instance(ActorType, ActorPid) ->
   gen_server:call(?ACTOR_TYPE_REGISTRY, {deregister_actor, ActorType, ActorPid}).
 
+
+% Internal functions
+get_protocol_pid(ProtocolName) ->
+  gen_server:call(?PROTOCOL_REGISTRY, {get_process_id, ProtocolName}).
+
+
+% Gets the monitor for a role in a given process
+get_monitor(ProtocolName, RoleName) ->
+  ProtocolPidRes = get_protocol_pid(ProtocolName),
+  case ProtocolPidRes of
+    {ok, ProtocolPid} ->
+      MonitorRes = gen_server:call(ProtocolPid, {get_monitor, RoleName}),
+      case MonitorRes of
+        {ok, Monitor} -> {ok, Monitor};
+        error -> {error, nonexistent_monitor} % Couldn't find the monitor
+      end;
+    error -> {error, bad_protocol_name} % Couldn't find the protocol process
+  end.
+

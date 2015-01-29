@@ -29,6 +29,15 @@ create_monitor(ScribbleFile, ProtocolName, RoleName) ->
     Other -> Other
   end.
 
+% Creates a monitor instance for a local protocol AST
+create_monitor(LocalProtocolAST = {local_protocol, ProtocolName, RoleName, _, _, _}) ->
+  MonitorResult = monitor_gen:generate_monitor(LocalProtocolAST),
+  case MonitorResult of
+    {ok, {_RID, States, Transitions}} ->
+      {ok, create_monitor_instance(ProtocolName, RoleName, States, Transitions)};
+    Other -> Other
+  end.
+
 % Creates a monitor instance given a protocol name, role name,
 % and state and transition tables
 create_monitor_instance(ProtocolName, RoleName, States, Transitions) ->
