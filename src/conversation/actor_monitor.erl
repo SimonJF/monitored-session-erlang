@@ -10,24 +10,7 @@
                      monitors, % Monitors for each role we play in each protocol
                      current_protocol}). % The currently-active protocol.
 
-
-% TODO:::::
-% I've misunderstood this a bit, and am going to have to make a few changes.
-% Basically, we can be involved with multiple protocols, but only one role
-% in each.
-% This will change the FSM / state a fair bit.
-%
-% Instead, we should always wait for synchronous invitation messages in
-% whichever state we're in, and accept if we're not involved in that
-% protocol type already.
-%
-% Really, we should move from gen_fsm to gen_server.
-% Each actor can only play one role per protocol, but can partake in multiple
-% protocols. This means that basically what we'll have to do is change
-% available_roles to available_protocols, where each entry is a
-% {ProtocolName, RoleName} pair.
-%
-% New state:
+% Monitor State
 % Actor PID (as before)
 % Actor type name (as before)
 % Protocol <-|-> Conversation ID mapping (as we can be involved in mult protocols)
@@ -67,14 +50,6 @@ fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap) ->
               monitors=orddict:new(), % Monitors for each role we play in each protocol
               current_protocol=undefined}. % The currently-active protocol.
 
-
-% TODO: Change this
-freshen_state(OldState) ->
-  ActorPid = OldState#conv_state.actor_pid,
-  ActorTypeName = OldState#conv_state.actor_type_name,
-  ProtocolRoleMap = OldState#conv_state.protocol_role_map,
-  fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap).
-
 % Initialises the basic monitor state with some default values.
 init([ActorPid, ActorTypeName, ProtocolRoleMap]) ->
   {ok, fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap)}.
@@ -98,33 +73,11 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
       % We can fulfil it!
       NewActiveProtocols = bidirectional_map:store(ProtocolName, ConversationID),
       {ok, State#conv_state{active_protocols=NewActiveProtocols}};
-    Other -> {error, cannot_fulfil}
+    _Other -> {error, cannot_fulfil}
   end.
 
 
-% We'll have a mixture of synchronous and asynchronous messages.
-% So...
-% System Messages:
-%   - Invitation (synchronous)
-%   - Ready (synchronous) -- Setup complete, transitions from setup to Working state
-%   - Terminate Conversation (asynchronous)
-%
-% Other messages are all asynchronous.
-% If we get invitation messages in anything other than the idle or setup states,
-% or if the invitation message is for a different conversation ID, we should send
-% back {error, already_occupied}.
-
-
-% Synchronous callbacks.
-% Module:StateName(Event, From, StateData) -> Result
-% Result can be...
-% {reply,Reply,NextStateName,NewStateData}
-%  | {reply,Reply,NextStateName,NewStateData,Timeout}
-%  | {reply,Reply,NextStateName,NewStateData,hibernate}
-%  | {next_state,NextStateName,NewStateData}
-%  | {next_state,NextStateName,NewStateData,Timeout}
-%  | {next_state,NextStateName,NewStateData,hibernate}
-
+% Handles an invitation to fulfil a role
 handle_invitation(ProtocolName, RoleName, ConversationID, StateData) ->
   AddRoleResult = add_role(ProtocolName, RoleName, ConversationID, StateData),
   % Try and add the role.
@@ -151,11 +104,12 @@ handle_invitation(ProtocolName, RoleName, ConversationID, StateData) ->
       {reply, {error, Err}, StateData}
   end.
 
+% Handle termination of a conversation -- remove from the conversation
 handle_terminate_conversation(ConversationID, State) ->
   ActorName = State#conv_state.actor_type_name,
   ActorPID = State#conv_state.actor_pid,
   ActiveProtocols = State#conv_state.active_protocols,
-  NewActiveProtocols = bidirectional_map:remove_right(ConversationID),
+  NewActiveProtocols = bidirectional_map:remove_right(ConversationID, ActiveProtocols),
   NewState = State#conv_state{active_protocols=NewActiveProtocols},
   error_logger:info_msg("INFO: Actor ~w with PID ~p exiting conversation ~p.~n",
                        [ActorName, ActorPID, ConversationID]),
@@ -167,6 +121,8 @@ deliver_message(Msg, StateData) ->
   RecipientPID = StateData#conv_state.actor_pid,
   gen_server:cast(RecipientPID, Msg).
 
+% Handles an incoming message. Checks whether we're in the correct conversation,
+% then grabs the monitor, then checks / updates the monitor state.
 handle_incoming_message(Msg = {message, MessageData}, ConversationID, StateData) ->
   Monitors = StateData#conv_state.monitors,
   % Get the protocol name for the conversation
@@ -174,7 +130,7 @@ handle_incoming_message(Msg = {message, MessageData}, ConversationID, StateData)
   ProtocolRoleMap = StateData#conv_state.protocol_role_map,
   CurrentProtocol = StateData#conv_state.current_protocol,
   % TODO: Set CurrentProtocol if it is undefined
-  ConversationProtocolResult = bidirectional_map:fetch_right(ConversationID),
+  ConversationProtocolResult = bidirectional_map:fetch_right(ConversationID, ActiveProtocols),
   case ConversationProtocolResult of
     {ok, ProtocolName} when CurrentProtocol == ProtocolName ->
       CurrentRole = orddict:fetch(ProtocolName, ProtocolRoleMap),
@@ -232,6 +188,7 @@ handle_incoming_message(Msg = {message, MessageData}, ConversationID, StateData)
                                     ConversationID]),
       {noreply, StateData}
   end;
+
 handle_incoming_message(Other, _CID, StateData) ->
   error_logger:warning_msg("WARN: handle_incoming_message called for non_message ~p " ++
                            "in actor ~p (instance PID ~p)",
@@ -239,14 +196,6 @@ handle_incoming_message(Other, _CID, StateData) ->
                             StateData#conv_state.actor_pid]),
   {noreply, StateData}.
 
-
-% Module:handle_call(Request, From, State) -> Result
-% Result = {reply,Reply,NewState} | {reply,Reply,NewState,Timeout}
-%  | {reply,Reply,NewState,hibernate}
-%  | {noreply,NewState} | {noreply,NewState,Timeout}
-%  | {noreply,NewState,hibernate}
-%  | {stop,Reason,Reply,NewState} | {stop,Reason,NewState}
-%
 
 % Synchronous messages:
 %  * Invitation
@@ -294,4 +243,6 @@ terminate(Reason, State) ->
                            [ActorTypeName, ActorPID, Reason]),
   ok.
 
+code_change(_Old, State, _Extra) ->
+  {ok, State}.
 
