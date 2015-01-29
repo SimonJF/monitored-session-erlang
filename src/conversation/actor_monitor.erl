@@ -2,18 +2,11 @@
 
 -behaviour(gen_server).
 -compile(export_all).
-% -record(conv_state, {actor_pid, % PID of the attached actor
-%                      actor_type_name, % Name of the actor type
-%                      conversation_id, % Conversation ID
-%                      available_roles, % Roles the actor has the ability to play
-%                      conversation_roles, % Roles the actor is playing in the conversation
-%                      monitors, % Set of monitors
-%                      active_role}). % Currently-active role
 
 -record(conv_state, {actor_pid, % PID of the attached actor
                      actor_type_name, % Name of the attached actor type
                      active_protocols, % Protocols which we're currently involved in
-                     registered_roles, % Roles for each protocol
+                     protocol_role_map, % Roles for each protocol
                      monitors, % Monitors for each role we play in each protocol
                      current_protocol}). % The currently-active protocol.
 
@@ -37,7 +30,7 @@
 % New state:
 % Actor PID (as before)
 % Actor type name (as before)
-% Protocol |-> Conversation ID mapping (as we can be involved in mult protocols)
+% Protocol <-|-> Conversation ID mapping (as we can be involved in mult protocols)
 % Protocol |-> Role mapping (where Role is the role we can play in a protocol)
 % Monitors (Protocol |-> Monitor Instance)
 % Active protocol
@@ -66,24 +59,25 @@
 %  - Figure out what needs to be changed in session_actor, and do those
 %  - Get monitor loading / storage / resets going. What stores what?
 
-fresh_state(ActorPid, ActorTypeName, AvailableRoles) ->
+fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap) ->
   #conv_state{actor_pid=ActorPid,
-              actor_type_name=ActorTypeName,
-              conversation_id=no_conversation,
-              available_roles=[],
-              conversation_roles=[],
-              monitors=orddict:new(),
-              active_role=no_active_role}.
+              actor_type_name=ActorTypeName, % Name of the attached actor type
+              active_protocols=bidirectional_map:new(), % Protocols which we're currently involved in
+              protocol_role_map=ProtocolRoleMap, % Roles for each protocol
+              monitors=orddict:new(), % Monitors for each role we play in each protocol
+              current_protocol=undefined}. % The currently-active protocol.
 
+
+% TODO: Change this
 freshen_state(OldState) ->
   ActorPid = OldState#conv_state.actor_pid,
   ActorTypeName = OldState#conv_state.actor_type_name,
-  AvailableRoles = OldState#conv_state.available_roles,
-  fresh_state(ActorPid, ActorTypeName, AvailableRoles).
+  ProtocolRoleMap = OldState#conv_state.protocol_role_map,
+  fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap).
 
 % Initialises the basic monitor state with some default values.
-init([ActorPid, ActorTypeName, AvailableRoles]) ->
-  {ok, fresh_state(ActorPid, ActorTypeName, AvailableRoles)}.
+init([ActorPid, ActorTypeName, ProtocolRoleMap]) ->
+  {ok, fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap)}.
 
 
 % Called when we've been invited to fufil a role.
@@ -92,25 +86,20 @@ init([ActorPid, ActorTypeName, AvailableRoles]) ->
 % Returns {ok, NewState} if we can fulfil the role, or either:
 %   * {error, already_fulfilled} --> if we've already fulfilled the role
 %   * {error, cannot_fulfil} --> if this role isn't offered by the actor
-add_role(RoleName, State) ->
-  AvailableRoles = State#conv_state.available_roles,
-  ConversationRoles = State#conv_state.conversation_roles,
-  % Check whether we've already fulfilled the role in the conversation
-  AlreadyFulfilled = lists:member(RoleName, ConversationRoles),
-  if not AlreadyFulfilled ->
-      % Check we can fulfil the role
-      CanFulfil = lists:member(RoleName, AvailableRoles),
-      if CanFulfil ->
-           NewConversationRoles = [RoleName|ConversationRoles],
-           {ok, State#conv_state{conversation_roles=NewConversationRoles}};
-         not CanFulfil ->
-           {error, cannot_fulfil}
-      end;
-    AlreadyFulfilled ->
-      {error, already_fulfilled}
+add_role(ProtocolName, RoleName, ConversationID, State) ->
+  % Firstly, check to see we're registered for the role
+  ProtocolRoleMap = State#conv_state.protocol_role_map,
+  ActiveProtocols = State#conv_state.active_protocols,
+  RoleFindRes = orddict:find(ProtocolName, ProtocolRoleMap),
+  AlreadyFulfilled = bidirectional_map:contains_left(ProtocolName, ActiveProtocols),
+  case {RoleFindRes, AlreadyFulfilled} of
+    {_, true} -> {error, already_fulfilled};
+    {{ok, RoleRes}, false} when RoleRes == RoleName ->
+      % We can fulfil it!
+      NewActiveProtocols = bidirectional_map:store(ProtocolName, ConversationID),
+      {ok, State#conv_state{active_protocols=NewActiveProtocols}};
+    Other -> {error, cannot_fulfil}
   end.
-
-
 
 
 % We'll have a mixture of synchronous and asynchronous messages.
@@ -136,8 +125,8 @@ add_role(RoleName, State) ->
 %  | {next_state,NextStateName,NewStateData,Timeout}
 %  | {next_state,NextStateName,NewStateData,hibernate}
 
-handle_invitation(ConversationID, RoleName, CurrentState, StateData) ->
-  AddRoleResult = add_role(RoleName, StateData),
+handle_invitation(ProtocolName, RoleName, ConversationID, StateData) ->
+  AddRoleResult = add_role(ProtocolName, RoleName, ConversationID, StateData),
   % Try and add the role.
   % If we succeed, add the role to the conversation_roles list, set the
   % conversation ID, and transition to setup.
@@ -146,47 +135,31 @@ handle_invitation(ConversationID, RoleName, CurrentState, StateData) ->
   case AddRoleResult of
     {ok, NewStateData} ->
       error_logger:info_msg("INFO: Actor ~w with PID ~p registered for role
-                             ~w.", [NewStateData#conv_state.actor_type_name,
-                                    NewStateData#conv_state.actor_pid,
-                                    RoleName]),
-      {reply, ok, setup, NewStateData};
+                             ~w in protocol ~w.~n",
+                            [NewStateData#conv_state.actor_type_name,
+                             NewStateData#conv_state.actor_pid,
+                             RoleName, ProtocolName]),
+      {reply, ok, NewStateData};
     {error, Err} ->
-      error_logger:warning_msg("WARN: Actor ~w could not fulfil role ~w: ~p",
+      error_logger:warning_msg("WARN: Actor ~w with PID ~p could not fulfil role " ++
+                               "~w in protocol ~w; error: ~p.~n",
                                [StateData#conv_state.actor_type_name,
+                                StateData#conv_state.actor_pid,
                                 RoleName,
+                                ProtocolName,
                                 Err]),
-      {reply, {error, Err}, CurrentState, StateData}
+      {reply, {error, Err}, StateData}
   end.
 
-handle_terminate_conversation(ConversationID, CurrentState, StateData) ->
-  ActorName = StateData#conv_state.actor_type_name,
-  ActorPID = StateData#conv_state.actor_pid,
-  CurrentCID = StateData#conv_state.conversation_id,
-  if ConversationID == CurrentCID ->
-       error_logger:info_msg("INFO: Actor ~w with PID ~p exiting conversation ~p.~n",
-                             [ActorName, ActorPID, ConversationID]),
-       {next_state, idle, freshen_state(StateData)};
-     ConversationID =/= CurrentCID ->
-       error_logger:warning_msg("WARN: Terminate conversation (ID ~p) called for monitor in " ++
-                                " different conversation (ID ~p) in actor type ~w with PID ~p.~n",
-                               [ConversationID, CurrentCID, ActorName, ActorPID]),
-       {next_state, CurrentState, StateData}
-  end.
-
-% Idle / setup have identical (boring) behaviours for async messages,
-% as most setup messages are synchronous.
-handle_setup_async(Inv = {invitation, _, _}, CurrentState, StateData) ->
-  error_logger:error_msg("ERROR: Monitor got asynchronous invitation message ~p~n", [Inv]),
-  {stop, error_invitation_async, StateData};
-handle_setup_async({terminate_conversation, ConvID}, CurrentState, StateData) ->
-  handle_terminate_conversation(ConvID, CurrentState, StateData);
-handle_setup_async(Msg = {message, _MsgData}, CurrentState, StateData) ->
-  error_logger:warning_msg("WARN: Got message (~p) in idle state: ignoring.~n ", [Msg, StateData]),
-  {next_state, CurrentState, StateData};
-handle_setup_async(Other, CurrentState, StateData) ->
-  error_logger:warning_msg("WARN: Got unhandled asynchronous message (~p) in ~p state: ignoring.",
-                           [Other, CurrentState]),
-  {next_state, CurrentState, StateData}.
+handle_terminate_conversation(ConversationID, State) ->
+  ActorName = State#conv_state.actor_type_name,
+  ActorPID = State#conv_state.actor_pid,
+  ActiveProtocols = State#conv_state.active_protocols,
+  NewActiveProtocols = bidirectional_map:remove_right(ConversationID),
+  NewState = State#conv_state{active_protocols=NewActiveProtocols},
+  error_logger:info_msg("INFO: Actor ~w with PID ~p exiting conversation ~p.~n",
+                       [ActorName, ActorPID, ConversationID]),
+  {noreply, NewState}.
 
 
 % Here, we deliver the message to the attached actor (which is a gen_server).
@@ -194,155 +167,131 @@ deliver_message(Msg, StateData) ->
   RecipientPID = StateData#conv_state.actor_pid,
   gen_server:cast(RecipientPID, Msg).
 
-handle_incoming_message(Msg = {message, MessageData}, StateData) ->
+handle_incoming_message(Msg = {message, MessageData}, ConversationID, StateData) ->
   Monitors = StateData#conv_state.monitors,
-  CurrentRole = StateData#conv_state.active_role,
-  % Find the monitor instance for the current role
-  % FIXME: This won't work -- we haven't set it yet!
-  MonitorInstance = orddict:find(CurrentRole, Monitors),
-  case MonitorInstance of
-    {ok, Monitor} ->
-      MonitorResult = monitor:recv(MessageData, Monitor),
-      case MonitorResult of
-        {ok, NewMonitorInstance} ->
-          NewMonitors = orddict:store(CurrentRole, NewMonitorInstance, Monitors),
-          NewStateData = StateData#conv_state{monitors=NewMonitors},
-          % Do delegation stuff here
-          % Send the MessageData to the session actor, let the logic in there
-          % unpack and delegate to user code
-          deliver_message(MessageData, NewStateData),
-          {next_state, working, NewStateData};
-        {error, Err} ->
-          error_logger:warning_msg("WARN: Monitor for conversation ID ~p " ++
-                                   "in actor ~w (instance PID ~p) with " ++
-                                   "active role ~w failed when receiving " ++
-                                   "message ~p. Error: ~p.~n",
-                                   [StateData#conv_state.conversation_id,
+  % Get the protocol name for the conversation
+  ActiveProtocols = StateData#conv_state.active_protocols,
+  ProtocolRoleMap = StateData#conv_state.protocol_role_map,
+  CurrentProtocol = StateData#conv_state.current_protocol,
+  % TODO: Set CurrentProtocol if it is undefined
+  ConversationProtocolResult = bidirectional_map:fetch_right(ConversationID),
+  case ConversationProtocolResult of
+    {ok, ProtocolName} when CurrentProtocol == ProtocolName ->
+      CurrentRole = orddict:fetch(ProtocolName, ProtocolRoleMap),
+      % Find the monitor instance for the current role
+      % FIXME: This won't work -- we haven't set it yet!
+      MonitorInstance = orddict:find(CurrentRole, Monitors),
+      case MonitorInstance of
+        {ok, Monitor} ->
+          MonitorResult = monitor:recv(MessageData, Monitor),
+          case MonitorResult of
+            {ok, NewMonitorInstance} ->
+              NewMonitors = orddict:store(CurrentRole, NewMonitorInstance, Monitors),
+              NewStateData = StateData#conv_state{monitors=NewMonitors},
+              % Do delegation stuff here
+              % Send the MessageData to the session actor, let the logic in there
+              % unpack and delegate to user code
+              deliver_message(MessageData, NewStateData),
+              {next_state, working, NewStateData};
+            {error, Err} ->
+              error_logger:warning_msg("WARN: Monitor for conversation ID ~p " ++
+                                       "in actor ~w (instance PID ~p) with " ++
+                                       "active role ~w failed when receiving " ++
+                                       "message ~p. Error: ~p.~n",
+                                       [ConversationID,
+                                        StateData#conv_state.actor_type_name,
+                                        StateData#conv_state.actor_pid,
+                                        CurrentRole, Msg, Err]),
+              {noreply, StateData}
+          end;
+        error ->
+          error_logger:warning_msg("WARN: Could not find monitor for role ~w in " ++
+                                   "actor of type ~w (instance PID ~p) in " ++
+                                   "conversation with ID ~p.~n",
+                                   [CurrentRole,
                                     StateData#conv_state.actor_type_name,
                                     StateData#conv_state.actor_pid,
-                                    CurrentRole, Msg, Err]),
-          {next_state, working, StateData}
+                                    ConversationID]),
+          {noreply, StateData}
       end;
+    {ok, ProtocolName} when CurrentProtocol =/= ProtocolName ->
+      % Our current protocol doesn't match the protocol associated with the message.
+      % Ignore for now, but will have to do something with this later.
+      error_logger:warning_msg("WARN: Actor ~w (instance PID ~p) could not " ++
+                                   "handle message ~p as it is for a different protocol " ++
+                                   "(~p) then the one that is currently running (~p).~n",
+                                   [StateData#conv_state.actor_type_name,
+                                    StateData#conv_state.actor_pid,
+                                    ProtocolName, CurrentProtocol]),
+      {noreply, StateData};
     error ->
-      error_logger:warning_msg("WARN: Could not find monitor for role ~w in " ++
-                               "actor of type ~w (instance PID ~p) in " ++
-                               "conversation with ID ~p.~n",
-                               [StateData#conv_state.active_role,
-                                StateData#conv_state.actor_type_name,
-                                StateData#conv_state.actor_pid,
-                                StateData#conv_state.conversation_id]),
-      {next_state, working, StateData}
-  end.
-
-
-% IDLE (Synchronous): Can handle invitation messages, but nothing else.
-% =====================================================================
-% =====================================================================
-idle({invitation, ConversationID, RoleName}, _Sender, StateData) ->
-  NewStateDataData = StateData#conv_state{conversation_id=ConversationID},
-  handle_invitation(ConversationID, RoleName, idle, NewStateDataData);
-idle(Other, _Sender, StateData) ->
-  error_logger:warning_msg("WARN: Monitor got unhandled synchronous messsage ~p in"
-                            ++ " idle state. ~n", [Other]),
-  {next_state, idle, StateData}.
-
-% SETUP (Synchronous): Can handle invitation messages and ready messages.
-% =======================================================================
-% =======================================================================
-setup({invitation, ConversationID, RoleName}, _Sender, State) ->
-  % Check that the conversation ID matches up with the current conversation ID,
-  % reject the invitation with already_occupied if not
-  CIDMatches = ConversationID == State#conv_state.conversation_id,
-  if CIDMatches ->
-       handle_invitation(ConversationID, RoleName, setup, State);
-     not CIDMatches ->
-       {reply, {error, already_occupied}, setup, State}
+      error_logger:warning_msg("WARN: Monitor for actor ~w (instance PID ~p) could not " ++
+                                   "find protocol for conversation ID ~p.~n",
+                                   [StateData#conv_state.actor_type_name,
+                                    StateData#conv_state.actor_pid,
+                                    ConversationID]),
+      {noreply, StateData}
   end;
-setup({ready, ConversationID}, _Sender, State) ->
-  % Transition into the working state.
-  error_logger:info_msg("Info: Monitor for actor ~p with PID ~p " ++
-                        "transitioning into working state. ~n",
-                       [State#conv_state.actor_type_name,
-                        State#conv_state.actor_pid]),
-  {next_state, working, State};
-setup(Other, _Sender, State) ->
-  error_logger:warning_msg("WARN: Monitor got unhandled synchronous messsage ~p"
-                            ++ " in setup state. ~n", [Other]),
-  {next_state, idle, State}.
-
-% WORKING (Synchronous): No valid messages
-% =======================================================================
-% =======================================================================
-working(Msg, _Sender, State) ->
-  error_logger:warning_msg("WARN: Monitor got synchronous messsage ~p"
-                            ++ " in working state. ~n", [Msg]),
-  % Transition into the working state.
-  {next_state, working, State}.
-
-% handle_terminate_conversation(ConversationID, CurrentState, StateData)
-
-% Asynchronous callbacks.
-% Module:StateName(Event, StateData) -> Result
-% Result can be...
-% {next_state,NextStateName,NewStateData}
-%  | {next_state,NextStateName,NewStateData,Timeout}
-%  | {next_state,NextStateName,NewStateData,hibernate}
-%  | {stop,Reason,NewStateData}
+handle_incoming_message(Other, _CID, StateData) ->
+  error_logger:warning_msg("WARN: handle_incoming_message called for non_message ~p " ++
+                           "in actor ~p (instance PID ~p)",
+                           [Other, StateData#conv_state.actor_type_name,
+                            StateData#conv_state.actor_pid]),
+  {noreply, StateData}.
 
 
+% Module:handle_call(Request, From, State) -> Result
+% Result = {reply,Reply,NewState} | {reply,Reply,NewState,Timeout}
+%  | {reply,Reply,NewState,hibernate}
+%  | {noreply,NewState} | {noreply,NewState,Timeout}
+%  | {noreply,NewState,hibernate}
+%  | {stop,Reason,Reply,NewState} | {stop,Reason,NewState}
+%
 
+% Synchronous messages:
+%  * Invitation
+%  * Termination
+%  handle_invitation(ProtocolName, RoleName, ConversationID, StateData) ->
+%  handle_terminate_conversation(ConversationID, CurrentState, State)
+handle_call({invitation, ProtocolName, RoleName, ConversationID}, _Sender, State) ->
+  handle_invitation(ProtocolName, RoleName, ConversationID, State);
+handle_call({terminate_conversation, ConversationID}, _Sender, State) ->
+  handle_terminate_conversation(ConversationID, State);
+handle_call(Other, Sender, State) ->
+  ActorTypeName = State#conv_state.actor_type_name,
+  ActorPID = State#conv_state.actor_pid,
+  error_logger:warning_msg("WARN: Monitor for actor ~w, instance PID ~p, received " ++
+                           "unhandled synchronous messsage ~p from PID ~p.~n",
+                           [ActorTypeName, ActorPID, Other, Sender]),
+  {noreply, State}.
 
-% IDLE (Asynchronous): Can't really do much!
-% =====================================================================
-% =====================================================================
-idle(Msg, StateData) ->
-  handle_setup_async(Msg, idle, StateData).
+% Module:handle_cast(Request, State) -> Result
+% Only async messages are actually data ones.
+% Delivering these, we'll need a conv ID, I think.
+handle_cast({msg, ConversationID, MessageData}, State) ->
+  handle_incoming_message(MessageData, ConversationID, State);
+handle_cast(Other, State) ->
+  ActorTypeName = State#conv_state.actor_type_name,
+  ActorPID = State#conv_state.actor_pid,
+  error_logger:warning_msg("WARN: Monitor for actor ~w, instance PID ~p, received " ++
+                           "unhandled asynchronous messsage ~p.~n",
+                           [ActorTypeName, ActorPID, Other]),
+  {noreply, State}.
 
-% SETUP (Asynchronous): Can't really do much either!
-% =====================================================================
-% =====================================================================
-setup(Msg, StateData) ->
-  handle_setup_async(Msg, setup, StateData).
+handle_info(Info, State) ->
+  ActorTypeName = State#conv_state.actor_type_name,
+  ActorPID = State#conv_state.actor_pid,
+  error_logger:warning_msg("WARN: Monitor for actor ~w, instance PID ~p, received " ++
+                           "unhandled info messsage ~p.~n",
+                           [ActorTypeName, ActorPID, Info]),
+  {noreply, State}.
 
-
-% WORKING (Asynchronous): Now this is the interesting one!
-% In this state, we can send and receive messages -- that is, the protocol
-% is in progress.
-% In this state, we grab the monitor from the monitor storage, check the incoming
-% message against it, and if it corresponds, then pass it to the actor itself.
-% It's also possible to terminate the conversation at this point, nuking the
-% conversation state and going back to idle.
-working(Msg = {message, MessageData}, StateData) ->
-  handle_incoming_message(Msg, StateData),
-  % Remain in the working state.
-  {next_state, working, StateData};
-working({terminate_conversation, ConvID}, StateData) ->
-  handle_terminate_conversation(ConvID, working, StateData).
-
-
-% Remaining uninteresting (yet required) OTP callbacks
-handle_info(Info, StateName, StateData) ->
-  error_logger:warning_msg("WARN: Monitor got info messsage ~p"
-                            ++ " in state ~p: ignoring. ~n", [Info, StateName]),
-  {next_state, StateName, StateData}.
-
-handle_event(Event, StateName, StateData) ->
-  error_logger:warning_msg("WARN: Monitor got synchronous event messsage ~p"
-                            ++ " in state ~p: ignoring. ~n", [Event, StateName]),
-  {next_state, StateName, StateData}.
-
-
-handle_sync_event(Event, _From, StateName, StateData) ->
-  error_logger:warning_msg("WARN: Monitor got asynchronous event messsage ~p"
-                            ++ " in state ~p: ignoring. ~n", [Event, StateName]),
-  {next_state, StateName, StateData}.
-
-code_change(OldVersion, StateName, StateData, _Extra) ->
-  {ok, StateName, StateData}.
-
-terminate(Reason, _StateName, StateData) ->
-  error_logger:error_msg("ERROR: Monitor for actor of type ~w (monitor PID ~p) " ++
-                         "terminating because of reason ~p",
-                         [StateData#conv_state.actor_type_name, self(), Reason]),
-
+terminate(Reason, State) ->
+  ActorTypeName = State#conv_state.actor_type_name,
+  ActorPID = State#conv_state.actor_pid,
+  error_logger:warning_msg("ERROR: Monitor for actor ~w, instance PID ~p, terminated " ++
+                           "for reason ~p.~n",
+                           [ActorTypeName, ActorPID, Reason]),
   ok.
+
+
