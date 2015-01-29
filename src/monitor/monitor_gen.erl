@@ -86,10 +86,13 @@ test_fsm(Filename) ->
                   io:format("AST: ~p~n", [AST]),
                   lists:foreach(fun (Mon) ->
                                 case Mon of
-                                  {ok, ProtocolName, {RID, States, Transitions}} ->
+                                  {ok, ProtocolName, {ok, {RID, States, Transitions}}} ->
                                     io:format("Monitor for local protocol ~s:~n", [ProtocolName]),
                                     print_fsm(States, Transitions),
                                     graphviz_out(States, Transitions);
+                                  {ok, ProtocolName, Error} ->
+                                    io:format("Error generating monitor for local protocol ~s:~n~p~n",
+                                              [ProtocolName, Error]);
                                   {error, invalid_protocol, AST} ->
                                     io:format("Error: ~p is not a local protocol ~n", [AST]);
                                   {error, monitor_gen, AST} ->
@@ -124,22 +127,27 @@ generate_monitor_for(AST = {module, _Name, _Imports, _Payloads, Protocols},
                      end end, Protocols),
   case FilteredList of
     [] -> {error, no_matching_protocol};
-    [X] -> {ok, generate_monitor(X)};
-    [X|XS] ->
+    [X] -> generate_monitor(X);
+    [X|_XS] ->
       % Really, there shouldn't be more than one. We could error out,
       % but here I'll just warn and opt to take the first.
       % I am a gracious god.
       io:format("WARN: Multiple matching monitors for ~s:~s~n", [ProtocolName, RoleName]),
-      {ok, generate_monitor(X)}
+      generate_monitor(X)
   end.
 
 
 % Generates a monitor from a local protocol. Only works with a local protocol definition!
-generate_monitor(LocalAST = {local_protocol, ProtocolName, ProjRoleName, Params, Roles, Block}) ->
+generate_monitor({local_protocol, ProtocolName, ProjRoleName, _Params, _Roles, Block}) ->
   Size = block_size(Block),
   RootScope = scope(ProtocolName ++ "@" ++ ProjRoleName, Block, Size),
-  {EndID, States1, Transitions1} = evaluate_scope(RootScope, 0, orddict:new(), orddict:new()),
-  add_node(EndID, end_node(EndID), States1, Transitions1).
+  EvalRes = evaluate_scope(RootScope, 0, orddict:new(), orddict:new()),
+  case EvalRes of
+    {EndID, States1, Transitions1} ->
+      {ok, add_node(EndID, end_node(EndID), States1, Transitions1)};
+    Other -> Other % Various monitor errors
+  end;
+generate_monitor(_Other) -> undefined.
 
 calculate_next_index([], RunningID, _EndIndex) ->
   RunningID;
