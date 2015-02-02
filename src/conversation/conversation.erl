@@ -32,21 +32,13 @@ deregister_actor_instance(ActorType, ActorPid) ->
 
 
 % Internal functions
-get_protocol_pid(ProtocolName) ->
-  gen_server:call(?PROTOCOL_REGISTRY, {get_process_id, ProtocolName}).
 
-% Gets the monitor for a role in a given process
-get_monitor(ProtocolName, RoleName) ->
-  ProtocolPidRes = get_protocol_pid(ProtocolName),
-  case ProtocolPidRes of
-    {ok, ProtocolPid} ->
-      MonitorRes = gen_server:call(ProtocolPid, {get_monitor, RoleName}),
-      case MonitorRes of
-        {ok, Monitor} -> {ok, Monitor};
-        error -> {error, nonexistent_monitor} % Couldn't find the monitor
-      end;
-    error -> {error, bad_protocol_name} % Couldn't find the protocol process
-  end.
+send(MonitorPID, Recipients, MessageName, Types, Payload)  ->
+  gen_server:call(MonitorPID, {send_msg, Recipients, MessageName, Types, Payload}).
 
-%send(MonitorPID, Role, MessageName, Types, Payload)  ->
-%  {send_msg, MessageData}
+% TODO: This doesn't currently automatically populate the role with the initiator.
+% This means that this won't work unless theres n=1 actors of the initiator's type.
+start_conversation(MonitorPID, ProtocolName) ->
+  % Retrieve the role names from the protocol reg server
+  % Start a new conversation instance
+  gen_server:

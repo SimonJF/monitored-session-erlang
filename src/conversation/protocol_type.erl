@@ -14,6 +14,7 @@
 %  * Role |-> Actor type mapping
 
 -record(protocol_state, {protocol_name, % Protocol name (string)
+                         role_names, % [Role]
                          role_specs, % Role |-> RoleSpec mappings (orddict)
                          monitors, % Role |-> Monitor mappings (orddict)
                          role_actor_mapping}). % Role |-> Actor Type
@@ -70,8 +71,8 @@ invite_actor_role(RoleName, ConversationID, State) ->
 
 init([ProtocolName, RoleSpecs, RoleMapping]) ->
   Monitors = generate_monitors(orddict:to_list(RoleSpecs), ProtocolName),
-  % TODO: Populate actor type instances from RoleSpec
   State = #protocol_state{protocol_name=ProtocolName,
+                          role_names=orddict:fetch_keys(RoleSpecs),
                           role_specs=RoleSpecs,
                           monitors=Monitors,
                           role_actor_mapping=RoleMapping},
@@ -83,6 +84,8 @@ handle_call({get_monitor, RoleName}, _From, State) ->
   % if we have the monitor, error if not
   Reply = orddict:find(RoleName, State#protocol_state.monitors),
   {reply, Reply, State};
+handle_call(get_roles, _From, State) ->
+  {reply, State#protocol_state.role_names, State};
 handle_call({begin_invitation, ConversationID}, _From, State) ->
   invite_actors(ConversationID, State);
 handle_call(Other, _From, State) ->

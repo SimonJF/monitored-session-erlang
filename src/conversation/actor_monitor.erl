@@ -66,7 +66,7 @@ fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap) ->
 load_monitors([], MonitorDict, _) ->
   MonitorDict;
 load_monitors([{ProtocolName, RoleName}|XS], MonitorDict, State) ->
-  MonitorRes = conversation:get_monitor(ProtocolName, RoleName),
+  MonitorRes = protocol_registry:get_monitor(ProtocolName, RoleName),
   case MonitorRes of
     {ok, Monitor} -> NewDict = orddict:store(ProtocolName, Monitor, MonitorDict),
                      load_monitors(XS, NewDict, State);
@@ -165,17 +165,26 @@ handle_incoming_message(Other, _CID, State) ->
   monitor_warn("handle_incoming_message called for non_message ~p", [Other], State),
   {noreply, State}.
 
-handle_outgoing_message(MessageData, State) ->
+handle_outgoing_message(Recipients, MessageName, Types, Payload, State) ->
   % Firstly, we need to get the conversation ID, based on the current role
   CurrentProtocol = State#conv_state.current_protocol,
+  ProtocolRoleMap = State#conv_state.protocol_role_map,
   ActiveProtocols = State#conv_state.active_protocols,
+  RoleRes = orddict:find(CurrentProtocol, ProtocolRoleMap),
   ConversationIDRes = bidirectional_map:find_left(CurrentProtocol, ActiveProtocols),
-  case ConversationIDRes of
-    {ok, ConversationID} ->
+  case {ConversationIDRes, RoleRes} of
+    {{ok, ConversationID}, {ok, RoleName}} ->
+      MessageData = message:message(make_ref(), RoleName, Recipients,
+                                    MessageName, Types, Payload),
       monitor_msg(send, MessageData, ConversationID, State);
-    error ->
-      monitor_warn("Couldn't find conversation for active protocol ~w.",
-                   [CurrentProtocol], State)
+    {{error, Err}, _} ->
+      monitor_warn("Couldn't find conversation for active protocol ~s.~n",
+                   [CurrentProtocol], State),
+      {error, Err};
+    {_, {error, Err}} ->
+      monitor_warn("Couldn't find current role for active protocol ~s.~n",
+                   [CurrentProtocol], State),
+      {error, Err}
   end.
 
 
@@ -212,12 +221,12 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
               end,
               {noreply, NewState};
             {error, Err} ->
-              monitor_warn("Monitor failed when receiving message ~p. Error: ~p",
-                           [MessageData, Err], State),
+              monitor_warn("Monitor failed when processing message ~p (~p). Error: ~p~n",
+                           [MessageData, CommType, Err], State),
               {noreply, State}
           end;
         error ->
-          monitor_warn("Could not find monitor for role ~s.", [CurrentRole], State),
+          monitor_warn("Could not find monitor for role ~s.~n", [CurrentRole], State),
           {noreply, State}
       end;
     {ok, ProtocolName} when CurrentProtocol =/= ProtocolName ->
@@ -241,8 +250,8 @@ handle_call({invitation, ProtocolName, RoleName, ConversationID}, _Sender, State
   handle_invitation(ProtocolName, RoleName, ConversationID, State);
 handle_call({terminate_conversation, ConversationID}, _Sender, State) ->
   handle_terminate_conversation(ConversationID, State);
-handle_call(Msg = {send_msg, _, _}, _Sender, State) ->
-  handle_outgoing_message(Msg, State);
+handle_call(Msg = {send_msg, Recipients, MessageName, Types, Payload}, _Sender, State) ->
+  handle_outgoing_message(Recipients, MessageName, Types, Payload, State);
 handle_call(Other, Sender, State) ->
   monitor_warn("Received unhandled synchronous message ~p from PID ~p.",
                [Other, Sender], State),

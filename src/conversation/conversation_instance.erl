@@ -5,14 +5,12 @@
 -record(conv_inst_state, {protocol_name,
                           role_mapping}).
 
-
 % Essentially a routing table for the conversation instance.
 % Needs to have functionality for actor-role discovery.
 
 % State:
 % Protocol Name
 % Role |-> Endpoint Mapping
-
 
 log_msg(Func, Format, Args, State) ->
   InfoStr = "(Conversation for protocol ~s, CID ~s)",
@@ -44,10 +42,36 @@ route_message(Msg, State) ->
                                       [Recipient], State)
                  end end, Recipients).
 
-% Callbacks...
-init(Args) -> {ok, {}}.
+% Add the participant to the Role |-> Endpoint map
+register_participant(RoleName, Sender, State) ->
+  RoleMap = State#conv_inst_state.role_mapping,
+  IsKey = orddict:is_key(RoleName, RoleMap),
+  % TODO: Possibly take more drastic action? Or just ignore...
+  NewRoleMap = if IsKey ->
+                    orddict:store(RoleName, Sender, RoleMap);
+                  not IsKey ->
+                    conversation_warn("Tried to register non-member role ~s",
+                                      [RoleName], State),
+                    RoleMap
+               end,
+  {reply, ok, State#conv_inst_state{role_mapping=NewRoleMap}}.
 
-handle_call(Msg, Sender, State) -> {noreply, State}.
+fresh_state(ProtocolName, RoleNames) ->
+  % Add the names to the map, so we can ensure we accept only roles which are
+  % meant to be accepted...
+  EmptyMap = orddict:from_list(lists:map(fun(RoleName) ->
+                                             {RoleName, undefined} end,
+                                        RoleNames)),
+  #conv_inst_state{protocol_name=ProtocolName, role_mapping=EmptyMap}.
+
+% Callbacks...
+init([ProtocolName, RoleNames]) -> {ok, fresh_state(ProtocolName, RoleNames)}.
+
+handle_call({accept_invitation, RoleName}, Sender, State) ->
+  register_participant(RoleName, Sender, State);
+handle_call(Other, Sender, State) ->
+  conversation_warn("Unhandled sync message ~w from ~p", [Other, Sender], State),
+  {noreply, State}.
 
 handle_cast({outgoing_msg, Msg}, State) ->
   route_message(Msg, State),
@@ -57,7 +81,9 @@ handle_cast(Other, State) ->
   {noreply, State}.
 
 
-handle_info(Msg, State) -> {noreply, State}.
+handle_info(Msg, State) ->
+  conversation_warn("Unhandled Info message ~w.", [Msg], State),
+  {noreply, State}.
 
 code_change(_Prev, State, _Extra) -> {ok, State}.
 terminate(Reason, State) -> ok.
