@@ -110,7 +110,12 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
     {{ok, RoleRes}, false} when RoleRes == RoleName ->
       % We can fulfil it!
       NewActiveProtocols = bidirectional_map:store(ProtocolName, ConversationID),
-      {ok, State#conv_state{active_protocols=NewActiveProtocols}};
+      % TODO: Try-Catch round this, in case the conversation goes away
+      Res = gen_server:call(ConversationID, {accept_invitation, RoleName}),
+      case Res of
+        ok -> {ok, State#conv_state{active_protocols=NewActiveProtocols}};
+        {error, Err} -> {error, Err}
+      end;
     _Other -> {error, cannot_fulfil}
   end.
 
@@ -154,6 +159,7 @@ deliver_outgoing_message(Msg, ConversationID) ->
 % Handles an incoming message. Checks whether we're in the correct conversation,
 % then grabs the monitor, then checks / updates the monitor state.
 handle_incoming_message({message, MessageData}, ConversationID, State) ->
+  monitor_info("Handling incoming message ~p", [MessageData], State),
   monitor_msg(send, MessageData, ConversationID, State);
 handle_incoming_message(Other, _CID, State) ->
   monitor_warn("handle_incoming_message called for non_message ~p", [Other], State),
@@ -181,6 +187,10 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
   CurrentProtocol = State#conv_state.current_protocol,
   % TODO: Set CurrentProtocol if it is undefined
   ConversationProtocolResult = bidirectional_map:fetch_right(ConversationID, ActiveProtocols),
+  MonitorFunction = case CommType of
+                      send -> fun monitor:send/2;
+                      recv -> fun monitor:recv/2
+                    end,
   case ConversationProtocolResult of
     {ok, ProtocolName} when CurrentProtocol == ProtocolName ->
       CurrentRole = orddict:fetch(ProtocolName, ProtocolRoleMap),
@@ -188,7 +198,7 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
       MonitorInstance = orddict:find(CurrentRole, Monitors),
       case MonitorInstance of
         {ok, Monitor} ->
-          MonitorResult = monitor:recv(MessageData, Monitor),
+          MonitorResult = MonitorFunction(MessageData, Monitor),
           case MonitorResult of
             {ok, NewMonitorInstance} ->
               NewMonitors = orddict:store(CurrentRole, NewMonitorInstance, Monitors),

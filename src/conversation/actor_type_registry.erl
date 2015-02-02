@@ -1,13 +1,15 @@
 -module(actor_type_registry).
 -behaviour(gen_server).
 -compile(export_all).
+-define(ACTOR_TYPE_REGISTRY, ssa_actor_type_registry).
+
 
 %%% Registry for actor types.
 %%% Maps actor type names to actor type processes.
 %%% Note: actor type processes != actor instances!
 
 spawn_child(ActorTypeName, ProcDict) ->
-  Result = gen_server:start("actor_type_process", [ActorTypeName], []),
+  Result = gen_server:start(actor_type, [ActorTypeName], []),
   case Result of
     {ok, Pid} -> orddict:store(ActorTypeName, Pid, ProcDict);
     Error ->
@@ -35,10 +37,9 @@ get_actor_type_pid(ActorTypeName, ActorTypeRegistry) ->
 % Returns either ok, or {error, error details}
 actor_type_call(ActorTypeName, Message, ActorTypeRegistry) ->
   case get_actor_type_pid(ActorTypeName, ActorTypeRegistry) of
-    {ok, ActorInstancePid} ->
-      gen_server:call(ActorInstancePid, Message),
-      ok;
-    Other -> {error, actor_type_not_registered}
+    {ok, ActorTypePid} ->
+      gen_server:call(ActorTypePid, Message);
+    _Other -> {error, actor_type_not_registered}
   end.
 
 
@@ -51,6 +52,13 @@ handle_deregister_actor(ActorTypeName, ActorInstancePid, ActorTypeRegistry) ->
   actor_type_call(ActorTypeName,
                   {deregister_actor, ActorInstancePid},
                   ActorTypeRegistry).
+
+handle_invite_actor(ActorTypeName, ProtocolName, RoleName, ConversationID,
+                    ActorTypeRegistry) ->
+  Res = actor_type_call(ActorTypeName,
+                        {invitation, ProtocolName, RoleName, ConversationID},
+                        ActorTypeRegistry),
+  {reply, Res, ActorTypeRegistry}.
 
 %% OTP Callback Functions
 
@@ -70,8 +78,9 @@ handle_call({register_actor, ActorType, ActorInstancePid}, From, ActorTypeRegist
 handle_call({deregister_actor, ActorType, ActorInstancePid}, From, ActorTypeRegistry) ->
   handle_deregister_actor(ActorType, ActorInstancePid, ActorTypeRegistry),
   {noreply, ActorTypeRegistry};
-
-
+handle_call({invite_actor, ActorTypeName, ProtocolName, RoleName, CID},
+            _From, ActorTypeRegistry) ->
+  handle_invite_actor(ActorTypeName, ProtocolName, RoleName, CID, ActorTypeRegistry);
 handle_call(Other, _From, ActorTypeRegistry) ->
   error_logger:error_msg("Unknown call message in ActorTypeRegistry: ~p~n", [Other]),
   {noreply, ActorTypeRegistry}.
@@ -94,4 +103,13 @@ terminate(Reason, _State) ->
   error_logger:error_msg("ERROR: Actor type registry terminating because of reason ~p~n.",
                          [Reason]),
   ok.
+
+
+% Internal API
+
+% Invite an actor to fulfil a role
+invite_actor_to_role(ActorTypeName, ProtocolName, RoleName, ConversationID) ->
+  gen_server:call(?ACTOR_TYPE_REGISTRY,
+                  {invite_actor, ActorTypeName, ProtocolName, RoleName,
+                   ConversationID}).
 

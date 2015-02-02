@@ -20,6 +20,7 @@ initialise(SpecDir, ActorTypes) ->
   % Next: start the actor type registry.
   {ok, _ATRPid} = gen_server:start_link({local, ?ACTOR_TYPE_REGISTRY},
                                         "actor_type_registry", [ActorTypes], []),
+  error_logger:info_message("Successfully initialised conversation system.~n", []),
   ok.
 
 
@@ -34,7 +35,6 @@ deregister_actor_instance(ActorType, ActorPid) ->
 get_protocol_pid(ProtocolName) ->
   gen_server:call(?PROTOCOL_REGISTRY, {get_process_id, ProtocolName}).
 
-
 % Gets the monitor for a role in a given process
 get_monitor(ProtocolName, RoleName) ->
   ProtocolPidRes = get_protocol_pid(ProtocolName),
@@ -48,3 +48,5 @@ get_monitor(ProtocolName, RoleName) ->
     error -> {error, bad_protocol_name} % Couldn't find the protocol process
   end.
 
+%send(MonitorPID, Role, MessageName, Types, Payload)  ->
+%  {send_msg, MessageData}

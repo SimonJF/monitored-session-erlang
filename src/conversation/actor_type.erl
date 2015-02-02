@@ -5,7 +5,6 @@
 -record(actor_type_state, {name,
                            actor_instances=[]}).
 
-%% OTP Callback Functions
 
 add_actor_instance(ActorInstancePid, ActorTypeState) ->
   ActorInstances = ActorTypeState#actor_type_state.actor_instances,
@@ -17,6 +16,30 @@ remove_actor_instance(ActorInstancePid, ActorTypeState) ->
   NewActorInstances = lists:delete(ActorInstancePid, ActorInstances),
   ActorTypeState#actor_type_state{actor_instances=NewActorInstances}.
 
+handle_invite_actor(ProtocolName, RoleName, ConversationID, ActorTypeState) ->
+  ActorInstances = ActorTypeState#actor_type_state.actor_instances,
+  Res = handle_invite_inner(ActorInstances, ProtocolName, RoleName, ConversationID),
+  {reply, Res, ActorTypeState}.
+
+
+handle_invite_inner([], ProtocolName, RoleName, _) ->
+  % Booo, nothing available
+  error_logger:warn_message("Unable to find endpoint for role ~s.~n", [RoleName]),
+  {error, no_registered_actor};
+handle_invite_inner([Instance|Instances], ProtocolName, RoleName, ConversationID) ->
+  % Try and invite the actor instance to fulfil the role.
+  Res = gen_server:call(Instance,
+                        {invitation, ProtocolName, RoleName, ConversationID}),
+  case Res of
+    % Wahey, it's added.
+    ok -> ok;
+    {error, Err} ->
+      error_logger:info_message("PID ~p could not fulfil role ~s: error ~w.~n",
+                                [Instance, RoleName, Err]),
+      handle_invite_inner(Instances, ProtocolName, RoleName, ConversationID)
+  end.
+
+%% OTP Callback Functions
 % Spawn processes for each of the protocol names
 init([ActorTypeName]) ->
   ActorState = #actor_type_state{name=ActorTypeName, actor_instances=[]},
@@ -27,8 +50,8 @@ handle_call({register_actor, ActorInstancePid}, From, ActorTypeState) ->
 handle_call({deregister_actor, ActorInstancePid}, From, ActorTypeState) ->
   NewState = remove_actor_instance(ActorInstancePid, ActorTypeState),
   {noreply, NewState};
-
-
+handle_call({invitation, ProtocolName, RoleName, ConversationID}, From, ActorTypeState) ->
+  handle_invite_actor(ProtocolName, RoleName, ConversationID, ActorTypeState);
 handle_call(Other, _From, ActorTypeState) ->
   error_logger:error_msg("Unknown call message in ActorTypeState: ~p~n", [Other]),
   {noreply, ActorTypeState}.
