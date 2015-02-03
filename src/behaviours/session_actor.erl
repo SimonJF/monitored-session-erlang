@@ -25,10 +25,16 @@
 
 
 % ssactor_init returns some state given some input args
-% ssactor_handle_message: SenderRole -> OperatorName -> PayloadTypes(?) -> Payload List
+% ssactor_handle_message:
+%   SenderRole ->
+%   OperatorName ->
+%   PayloadTypes(?) ->
+%   Payload List ->
+%   State ->
+%   NewState
 behaviour_info(callbacks) ->
     [{ssactor_init,1},
-     {ssactor_handle_msg, 2}];
+     {ssactor_handle_msg, 5}];
 behaviour_info(_Other) ->
     undefined.
 
@@ -74,9 +80,10 @@ handle_call(Request, _From, State) ->
 handle_cast(Msg = {message, _, Sender, Op, Types, Payload}, State) ->
   actor_info("Processing message ~w", [Msg], State),
   Module = State#actor_state.actor_module,
+  UserState = State#actor_state.user_state,
   % TODO: ssactor_handle_message currently just returns a new state.
   % Should we have some more complex callback here instead?
-  NewState = Module:ssactor_handle_message(Sender, Op, Types, Payload),
+  NewState = Module:ssactor_handle_message(Sender, Op, Types, Payload, UserState),
   {noreply, NewState};
 handle_cast(Msg, State) ->
   actor_warn("Received unhandled asynchronous message ~p", [Msg], State),
