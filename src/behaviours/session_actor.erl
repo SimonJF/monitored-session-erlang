@@ -32,6 +32,22 @@ behaviour_info(callbacks) ->
 behaviour_info(_Other) ->
     undefined.
 
+log_msg(Func, Format, Args, State) ->
+  InfoStr = "SSACTOR: Actor ~s, actor PID ~p, monitor PID ~p.",
+  InfoArgs = [State#actor_state.actor_type_name,
+              self(),
+              State#actor_state.monitor_pid],
+  Func(Format ++ "~n" ++ InfoStr, Args ++ InfoArgs).
+
+actor_warn(Format, Args, State) ->
+  log_msg(fun error_logger:warn_message/2, Format, Args, State).
+
+actor_error(Format, Args, State) ->
+  log_msg(fun error_logger:error_message/2, Format, Args, State).
+
+actor_info(Format, Args, State) ->
+  log_msg(fun error_logger:info_message/2, Format, Args, State).
+
 
 % gen_server callbacks
 init([Module, ActorTypeName, ProtocolRoleMap, UserArgs]) ->
@@ -40,7 +56,7 @@ init([Module, ActorTypeName, ProtocolRoleMap, UserArgs]) ->
     {ok, MonitorPid} ->
       UserState = Module:ssactor_init(UserArgs),
       {ok, #actor_state{monitor_pid=MonitorPid,
-                        user_state=UserArgs,
+                        user_state=UserState,
                         actor_module=Module}};
     Other ->
       {error, monitor_start_failed, Other}
@@ -48,47 +64,37 @@ init([Module, ActorTypeName, ProtocolRoleMap, UserArgs]) ->
 
 
 % We shouldn't have any synchronous calls -- log and ignore.
-handle_call(Request, From, State) ->
-  error_logger:warning_msg("WARN: Synchronous message received by session " ++
-                           "actor process of type ~w, PID ~p: inoring.~n",
-                           [State#actor_state.actor_type_name, self()]),
+handle_call(Request, _From, State) ->
+  actor_warn("Received unhandled ynchronous message ~p", [Request], State),
   {noreply, State}.
 
 
 % Handle incoming user messages. These have been checked by the monitor to
 % ensure that they conform to the MPST.
-handle_cast(Msg = {message, Id, Sender, Op, Types, Payload}, State) ->
-  error_logger:info_msg("INFO: Processing message ~w received by actor of " ++
-                        "type ~w, with instance PID of ~w",
-                       [Msg, State#actor_state.actor_type_name, self()]),
+handle_cast(Msg = {message, _, Sender, Op, Types, Payload}, State) ->
+  actor_info("Processing message ~w", [Msg], State),
   Module = State#actor_state.actor_module,
   % TODO: ssactor_handle_message currently just returns a new state.
   % Should we have some more complex callback here instead?
   NewState = Module:ssactor_handle_message(Sender, Op, Types, Payload),
   {noreply, NewState};
-handle_cast(Other, State) ->
-  error_logger:warning_msg("WARN: Unhandled message ~w received by actor of " ++
-                           "type ~w, with instance PID of ~w",
-                           [Other, State#actor_state.actor_type_name, self()]),
+handle_cast(Msg, State) ->
+  actor_warn("Received unhandled asynchronous message ~p", [Msg], State),
   {noreply, State}.
 
 
 % Info messages -- we don't do anything with these
 handle_info(Msg, State) ->
-  error_logger:warning_msg("WARN: Unhandled info msg ~w received by actor of " ++
-                           "type ~w, with instance PID of ~w",
-                           [Msg, State#actor_state.actor_type_name, self()]),
+  actor_warn("Received unhandled info message ~p", [Msg], State),
   {noreply, State}.
 
 
 % We don't need this.
-code_change(PreviousVersion, State, Extra) ->
+code_change(_PreviousVersion, State, _Extra) ->
   {ok, State}.
 
 terminate(Reason, State) ->
-  error_logger:error_msg("ERROR: Actor of type ~w (instance PID ~p) " ++
-                         "terminating because of reason ~p",
-                         [State#actor_state.actor_type_name, self(), Reason]),
+  actor_error("Actor terminating for reason ~w", [Reason], State),
   ok.
 
 % Public API
