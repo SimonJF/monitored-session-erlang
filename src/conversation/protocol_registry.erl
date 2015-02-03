@@ -102,3 +102,9 @@ get_roles(ProtocolName) ->
   GetRoleFunc = fun (ProtocolPid) -> gen_server:call(ProtocolPid, get_roles) end,
   with_protocol_process(ProtocolName, GetRoleFunc).
 
+start_invitation(ProtocolName, ConversationID) ->
+  StartInviteFunc = fun (ProtocolPid) ->
+                        gen_server:call(ProtocolPid, {begin_invitation, ConversationID})
+                    end,
+  with_protocol_process(ProtocolName, StartInviteFunc).
+

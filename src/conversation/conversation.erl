@@ -36,9 +36,20 @@ deregister_actor_instance(ActorType, ActorPid) ->
 send(MonitorPID, Recipients, MessageName, Types, Payload)  ->
   gen_server:call(MonitorPID, {send_msg, Recipients, MessageName, Types, Payload}).
 
-% TODO: This doesn't currently automatically populate the role with the initiator.
-% This means that this won't work unless theres n=1 actors of the initiator's type.
+% FIXME: This doesn't currently automatically populate the role with the initiator.
+% This means that this won't work unless there's exactly n=1 actors of the initiator's type.
 start_conversation(MonitorPID, ProtocolName) ->
   % Retrieve the role names from the protocol reg server
   % Start a new conversation instance
-  gen_server:
+  RoleRes = protocol_registry:get_roles(ProtocolName),
+  case RoleRes of
+    {ok, Roles} ->
+      % Next, need to start a new conversation process
+      ConversationProc = gen_server:start([ProtocolName, Roles]),
+      case ConversationProc of
+        % And start the invitation system
+        {ok, ConvPID} -> protocol_registry:start_invitation(ProtocolName, ConvPID);
+        Err -> Err
+      end;
+    Err -> Err
+  end.
