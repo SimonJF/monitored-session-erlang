@@ -1,0 +1,20 @@
+module src.com.simonjf.scribbletest.TwoBuyer;
+
+type <erlang> "string" from "" as String;
+type <erlang> "integer" from "" as Integer;
+
+global protocol TwoBuyers(role A, role B, role S) {
+	title(String) from A to S;
+	quote(Integer) from S to A, B;
+	// TODO: Loop recursion here
+	share(Integer) from A to B;
+	choice at B {
+		accept(address:String) from B to A, S;
+		date(String) from S to B;
+	} or {
+		retry() from B to A, S;
+		// TODO Loop here
+	} or {
+		quit() from B to A, S;
+	}
+}

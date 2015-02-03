@@ -1,0 +1,17 @@
+module src.com.simonjf.scribbletest.TwoBuyer_A;
+
+type <erlang> "string" from "" as String;
+type <erlang> "integer" from "" as Integer;
+
+local protocol TwoBuyers at A(role A,role B,role S) {
+	title(String) to S;
+	quote(Integer) from S;
+	share(Integer) to B;
+	choice at B {
+		accept(address:String) from B;
+	} or {
+		retry() from B;
+	} or {
+		quit() from B;
+	}
+}

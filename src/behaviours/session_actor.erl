@@ -57,7 +57,7 @@ actor_info(Format, Args, State) ->
 
 % gen_server callbacks
 init([Module, ActorTypeName, ProtocolRoleMap, UserArgs]) ->
-  MonitorProcess = gen_server:start_link([self(), ActorTypeName, ProtocolRoleMap]),
+  MonitorProcess = gen_server:start_link(actor_monitor, [self(), ActorTypeName, ProtocolRoleMap], []),
   case MonitorProcess of
     {ok, MonitorPid} ->
       UserState = Module:ssactor_init(UserArgs),

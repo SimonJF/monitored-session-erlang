@@ -54,3 +54,5 @@ start_conversation(_MonitorPID, ProtocolName) ->
     Err -> Err
   end.
 
+%spawn_session_actor(ActorModule, Args) ->
+%  gen_server:start(session_actor, [ActorModule,
