@@ -38,7 +38,7 @@ send(MonitorPID, Recipients, MessageName, Types, Payload)  ->
 
 % FIXME: This doesn't currently automatically populate the role with the initiator.
 % This means that this won't work unless there's exactly n=1 actors of the initiator's type.
-start_conversation(MonitorPID, ProtocolName) ->
+start_conversation(_MonitorPID, ProtocolName) ->
   % Retrieve the role names from the protocol reg server
   % Start a new conversation instance
   RoleRes = protocol_registry:get_roles(ProtocolName),
@@ -53,3 +53,4 @@ start_conversation(MonitorPID, ProtocolName) ->
       end;
     Err -> Err
   end.
+

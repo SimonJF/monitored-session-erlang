@@ -24,7 +24,8 @@ handle_invite_actor(ProtocolName, RoleName, ConversationID, ActorTypeState) ->
 
 handle_invite_inner([], ProtocolName, RoleName, _) ->
   % Booo, nothing available
-  error_logger:warn_message("Unable to find endpoint for role ~s.~n", [RoleName]),
+  error_logger:warn_message("Unable to find endpoint for protocol~s role ~s.~n",
+                            [ProtocolName, RoleName]),
   {error, no_registered_actor};
 handle_invite_inner([Instance|Instances], ProtocolName, RoleName, ConversationID) ->
   % Try and invite the actor instance to fulfil the role.
@@ -44,13 +45,13 @@ handle_invite_inner([Instance|Instances], ProtocolName, RoleName, ConversationID
 init([ActorTypeName]) ->
   ActorState = #actor_type_state{name=ActorTypeName, actor_instances=[]},
   {ok, ActorState}.
-handle_call({register_actor, ActorInstancePid}, From, ActorTypeState) ->
+handle_call({register_actor, ActorInstancePid}, _From, ActorTypeState) ->
   NewState = add_actor_instance(ActorInstancePid, ActorTypeState),
   {noreply, NewState};
-handle_call({deregister_actor, ActorInstancePid}, From, ActorTypeState) ->
+handle_call({deregister_actor, ActorInstancePid}, _From, ActorTypeState) ->
   NewState = remove_actor_instance(ActorInstancePid, ActorTypeState),
   {noreply, NewState};
-handle_call({invitation, ProtocolName, RoleName, ConversationID}, From, ActorTypeState) ->
+handle_call({invitation, ProtocolName, RoleName, ConversationID}, _From, ActorTypeState) ->
   handle_invite_actor(ProtocolName, RoleName, ConversationID, ActorTypeState);
 handle_call(Other, _From, ActorTypeState) ->
   error_logger:error_msg("Unknown call message in ActorTypeState: ~p~n", [Other]),

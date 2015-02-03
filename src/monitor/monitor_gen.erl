@@ -15,17 +15,17 @@
 make_node(NodeType, Id, Info) ->
   {NodeType, Id, Info}.
 
-receive_node(Id, LocalReceive = {local_receive, MessageSig, Sender}) ->
+receive_node(Id, {local_receive, MessageSig, Sender}) ->
   {message_signature, MessageName, PayloadTypes} = MessageSig,
   Info = {Sender, MessageName, PayloadTypes},
   make_node(receive_node, Id, Info).
 
-send_node(Id, LocalSend = {local_send, MessageSig, Recipients}) ->
+send_node(Id, {local_send, MessageSig, Recipients}) ->
   {message_signature, MessageName, PayloadTypes} = MessageSig,
   Info = {Recipients, MessageName, PayloadTypes},
   make_node(send_node, Id, Info).
 
-choice_node(Id, Choice) ->
+choice_node(Id, _Choice) ->
   make_node(choice_node, Id, {}).
 
 end_node(Id) -> make_node(end_node, Id, {}).
@@ -49,7 +49,7 @@ instruction_size({local_receive, _, _}) -> 1;
 instruction_size({choice, _, Choices}) ->
   1 + lists:foldl(fun(ChoiceBlock, Sum) -> Sum + block_size(ChoiceBlock) end, 0, Choices);
 instruction_size({recursion, _, Block}) -> block_size(Block);
-instruction_size({par, ParallelBlocks}) -> 0; %FIXME: uhhhhh -- need to look up nested FSM stuff. God, writing this is going to take forever
+instruction_size({par, _ParallelBlocks}) -> 0; %FIXME: uhhhhh -- need to look up nested FSM stuff. God, writing this is going to take forever
 instruction_size({local_interruptible, _, InterruptibleBlock, _}) -> % FIXME: No idea how to do this one either
   block_size(InterruptibleBlock);
 instruction_size({local_interruptible_throw, _, InterruptibleBlock, _, _}) ->
@@ -86,7 +86,7 @@ test_fsm(Filename) ->
                   io:format("AST: ~p~n", [AST]),
                   lists:foreach(fun (Mon) ->
                                 case Mon of
-                                  {ok, ProtocolName, {ok, {RID, States, Transitions}}} ->
+                                  {ok, ProtocolName, {ok, {_RID, States, Transitions}}} ->
                                     io:format("Monitor for local protocol ~s:~n", [ProtocolName]),
                                     print_fsm(States, Transitions),
                                     graphviz_out(States, Transitions);
@@ -102,7 +102,7 @@ test_fsm(Filename) ->
 
   end.
 
-generate_module_monitors(AST = {module, _Name, _Imports, _Payloads, Protocols}) ->
+generate_module_monitors({module, _Name, _Imports, _Payloads, Protocols}) ->
   lists:map(fun (Protocol) ->
                 case Protocol of
                   {local_protocol, ProtocolName, _, _, _, _} ->
@@ -111,11 +111,11 @@ generate_module_monitors(AST = {module, _Name, _Imports, _Payloads, Protocols}) 
                     {error, invalid_protocol, Other}
                 end
             end, Protocols);
-generate_module_monitors(AST) ->
+generate_module_monitors(_AST) ->
   {error, not_a_module}.
 
 
-generate_monitor_for(AST = {module, _Name, _Imports, _Payloads, Protocols},
+generate_monitor_for({module, _Name, _Imports, _Payloads, Protocols},
                      ProtocolName, RoleName) ->
   FilteredList =
     lists:filter(fun (Protocol) ->
@@ -162,7 +162,7 @@ add_transition(From, To, TransitionTable) ->
                               sets:from_list([To]), TransitionTable).
 
 % Scope -> RunningID -> States -> Transitions -> {ID, States, Transitions}
-evaluate_scope(Scope = {scope, _Name, Instructions, EndIndex}, RunningID, States, Transitions) ->
+evaluate_scope({scope, _Name, Instructions, EndIndex}, RunningID, States, Transitions) ->
   % Okay, so we're in the scope, have a running ID, state table and transition table.
   % We need to generate nodes for each of the instructions.
   % If the instruction is a send or receive, then it should have a transition to the
@@ -244,7 +244,7 @@ print_fsm(States, Transitions) ->
                    io:format("~p: ~w~n", [S, sets:to_list(TSet)]),
                    {} end, {}, Transitions).
 
-graphviz_out(States, Transitions) ->
+graphviz_out(_States, Transitions) ->
   io:format("digraph G {~n", []),
   orddict:fold((fun (S, TSet, _Acc) ->
                    % io:format("~p: ~w~n", [S, sets:to_list(TSet)]),

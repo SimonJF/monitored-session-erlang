@@ -52,7 +52,7 @@ current_monitor_node(MonitorInstance) ->
   get_state(CurrentStateNum, MonitorInstance).
 
 % Returns a list of outgoing nodes from the given node
-outgoing_transitions(MonitorNode = {_NodeType, Id, _Info}, MonitorInstance) ->
+outgoing_transitions({_NodeType, Id, _Info}, MonitorInstance) ->
   Transitions = MonitorInstance#monitor_instance.transitions,
   % If a state has no outgoing transitions, it may not be in the transition table.
   % That's fine -- just return the empty list.
@@ -78,11 +78,11 @@ check_transition_list(TransitionList) ->
   case TransitionList of
     [] -> {error, no_transitions};
     [X] -> {ok, X};
-    [X|XS] -> {error, nondeterminism}
+    [_X|_XS] -> {error, nondeterminism}
   end.
 
 % These utility functions are a tad on the messy side...
-transition_next_node(Message, MonitorNode, PredicateResult, MonitorInstance) ->
+transition_next_node(_Message, MonitorNode, PredicateResult, MonitorInstance) ->
   case PredicateResult of
     true ->
       % Check to ensure there's exactly one outward transition, otherwise
@@ -109,7 +109,7 @@ filter_outgoing_transitions(InteractionType, NodeType, Message, MonitorNode, Pre
                  {ok, NN} -> {true, NN};
                  _Other -> false
                end;
-             {false, Error} -> false
+             {false, _Error} -> false
            end;
          % If not, don't include
          % Erlang is stupid
@@ -119,7 +119,7 @@ filter_outgoing_transitions(InteractionType, NodeType, Message, MonitorNode, Pre
 
 % Gets the next node, given an interaction type, message, monitor node, and monitor instance.
 % This will either be {ok, Node} or {error , Error}
-next_node(InteractionType, Message, MonitorNode = {choice_node, Id, _Info}, MonitorInstance) ->
+next_node(InteractionType, Message, MonitorNode = {choice_node, _Id, _Info}, MonitorInstance) ->
   % - In case of sends, filter send nodes; converse for receive nodes
   % - Filter valid ones
   %
@@ -154,7 +154,7 @@ next_node(_IT, _Msg, _MN, _MI) ->
   {error, bad_node}.
 
 % Checks whether we can send or receive at this point
-can_receive_at(Message, MonitorNode = {receive_node, Id, Info}, MonitorInstance) ->
+can_receive_at(Message, {receive_node, _Id, Info}, _MonitorInstance) ->
   {Sender, MessageName, PayloadTypes} = Info,
   CorrectSender = message:message_sender(Message) == Sender,
   CorrectMessageName = message:message_name(Message) == MessageName,
@@ -165,7 +165,7 @@ can_receive_at(Message, MonitorNode = {receive_node, Id, Info}, MonitorInstance)
     {_, false, _} -> {false, bad_message_name};
     {_, _, false} -> {false, bad_payload_types}
   end;
-can_receive_at(Message, MonitorNode = {choice_node, Id, _Info}, MonitorInstance) ->
+can_receive_at(Message, MonitorNode = {choice_node, _Id, _Info}, MonitorInstance) ->
   % Righto. At this point, we need to check all of the outgoing transitions to
   % see whether they have an appropriate receive output node.
   % If so, we take the transition out of that.
@@ -176,11 +176,11 @@ can_receive_at(Message, MonitorNode = {choice_node, Id, _Info}, MonitorInstance)
                                                     fun monitor_gen:can_receive_at/3,
                                                     MonitorInstance),
   lists:length(OutgoingTransitions) == 1;
-can_receive_at(_Message, MonitorNode, _MonitorInstance) ->
+can_receive_at(_Message, _MonitorNode, _MonitorInstance) ->
   {false, bad_node_type}.
 
 
-can_send_at(Message, MonitorNode = {send_node, Id, Info}, MonitorInstance) ->
+can_send_at(Message, MonitorNode = {send_node, _Id, Info}, _MonitorInstance) ->
   io:format("can_send_at called, node: ~p~n", [MonitorNode]),
   {Recipients, MessageName, PayloadTypes} = Info,
   CorrectRecipients = lists:sort(Recipients) == lists:sort(message:message_recipients(Message)),
@@ -192,7 +192,7 @@ can_send_at(Message, MonitorNode = {send_node, Id, Info}, MonitorInstance) ->
     {_, false, _} -> {false, bad_message_name};
     {_, _, false} -> {false, bad_payload_types}
   end;
-can_send_at(_Message, MonitorNode, MonitorInstance) ->
+can_send_at(_Message, MonitorNode, _MonitorInstance) ->
   io:format("can_send_at called, node: ~p~n", [MonitorNode]),
   {false, bad_node_type}.
 
@@ -204,7 +204,7 @@ check_message(InteractionType, Message, MonitorInstance) ->
   CurrentNode = current_monitor_node(MonitorInstance),
   NextNodeResult = next_node(InteractionType, Message, CurrentNode, MonitorInstance),
   case NextNodeResult of
-    {ok, NextNode = {_NodeType, Id, _Info}} ->
+    {ok, {_NodeType, Id, _Info}} ->
       NewMonitorInstance = MonitorInstance#monitor_instance{current_state=Id},
       {ok, NewMonitorInstance};
     {error, Error} -> {error, Error, MonitorInstance}

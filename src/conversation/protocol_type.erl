@@ -1,5 +1,5 @@
 -module(protocol_type).
-
+-compile(export_all).
 % Protocol type process. (AKA Protocol Manager, which makes more sense)
 % Capabilities:
 %  * Return monitors for process roles
@@ -55,7 +55,7 @@ invite_actors_inner([Role|Roles], ConversationID, State) ->
   end.
 
 invite_actor_role(RoleName, ConversationID, State) ->
-  ProtocolName = State#protocol_state.protocol_name,
+  ProtocolName = protocol_name(State),
   ActorTypeRes = orddict:fetch(RoleName, role_actor_mapping),
   case ActorTypeRes of
     {ok, ActorType} ->

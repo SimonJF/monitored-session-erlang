@@ -250,7 +250,7 @@ handle_call({invitation, ProtocolName, RoleName, ConversationID}, _Sender, State
   handle_invitation(ProtocolName, RoleName, ConversationID, State);
 handle_call({terminate_conversation, ConversationID}, _Sender, State) ->
   handle_terminate_conversation(ConversationID, State);
-handle_call(Msg = {send_msg, Recipients, MessageName, Types, Payload}, _Sender, State) ->
+handle_call({send_msg, Recipients, MessageName, Types, Payload}, _Sender, State) ->
   handle_outgoing_message(Recipients, MessageName, Types, Payload, State);
 handle_call(Other, Sender, State) ->
   monitor_warn("Received unhandled synchronous message ~p from PID ~p.",

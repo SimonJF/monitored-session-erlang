@@ -86,4 +86,4 @@ handle_info(Msg, State) ->
   {noreply, State}.
 
 code_change(_Prev, State, _Extra) -> {ok, State}.
-terminate(Reason, State) -> ok.
+terminate(_Reason, _State) -> ok.

@@ -67,15 +67,15 @@ init([ActorTypes]) ->
   ActorTypeRegistry = spawn_children(ActorTypes),
   {ok, ActorTypeRegistry}.
 
-handle_call({get_process_id, ActorTypeName}, From, ActorTypeRegistry) ->
+handle_call({get_process_id, ActorTypeName}, _From, ActorTypeRegistry) ->
   % Try and find the protocol name in the dictionary, returning either
   % {ok, Pid} or error
   Result = get_actor_type_pid(ActorTypeName, ActorTypeRegistry),
   {reply, Result, ActorTypeRegistry};
-handle_call({register_actor, ActorType, ActorInstancePid}, From, ActorTypeRegistry) ->
+handle_call({register_actor, ActorType, ActorInstancePid}, _From, ActorTypeRegistry) ->
   handle_register_actor(ActorType, ActorInstancePid, ActorTypeRegistry),
   {noreply, ActorTypeRegistry};
-handle_call({deregister_actor, ActorType, ActorInstancePid}, From, ActorTypeRegistry) ->
+handle_call({deregister_actor, ActorType, ActorInstancePid}, _From, ActorTypeRegistry) ->
   handle_deregister_actor(ActorType, ActorInstancePid, ActorTypeRegistry),
   {noreply, ActorTypeRegistry};
 handle_call({invite_actor, ActorTypeName, ProtocolName, RoleName, CID},

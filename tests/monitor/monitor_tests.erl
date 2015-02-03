@@ -26,7 +26,7 @@ simple_send_recv_role1_bad_test() ->
   {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
   ?assertNot(monitor:is_ended(MonitorInstance)),
   RequestMessage = message:message(0, "Role1", ["Role2"], "Request", [], []),
-  {error, Error, MonitorInstance1} = monitor:recv(RequestMessage, MonitorInstance).
+  {error, _Error, _MonitorInstance1} = monitor:recv(RequestMessage, MonitorInstance).
 
 simple_send_recv_role2_test() ->
   Filename = ?SPEC_DIRECTORY ++ "RequestResponse_Role2.scr",

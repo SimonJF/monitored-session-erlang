@@ -11,7 +11,7 @@
 
 new() -> {orddict:new(), orddict:new()}.
 
-store(Left, Right, Map = {LeftMap, RightMap}) ->
+store(Left, Right, Map = {_LeftMap, _RightMap}) ->
   {LM, RM} = remove_left(Left, Map),
   LM1 = orddict:store(Left, Right, LM),
   RM1 = orddict:store(Right, Left, RM),

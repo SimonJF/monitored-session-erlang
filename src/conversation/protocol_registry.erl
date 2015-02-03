@@ -47,7 +47,7 @@ init([ProtocolMappings]) ->
   ProtocolRegistry = spawn_children(ProtocolMappings),
   {ok, ProtocolRegistry}.
 
-handle_call({get_process_id, ProtocolName}, From, ProtocolRegistry) ->
+handle_call({get_process_id, ProtocolName}, _From, ProtocolRegistry) ->
   % Try and find the protocol name in the dictionary, returning either
   % {ok, Pid} or error
   Result = orddict:find(ProtocolName, ProtocolRegistry),
@@ -67,7 +67,8 @@ handle_info(Other, ProtocolRegistry) ->
   {noreply, ProtocolRegistry}.
 
 terminate(Reason, _ProtocolRegistry) ->
-  error_logger:error_msg("ERROR: Process registry terminated.~n").
+  error_logger:error_msg("ERROR: Process registry terminated, reason: ~p~n",
+                        [Reason]).
 
 % Don't need this
 code_change(_PV, ProtocolRegistry, _Ex) ->
