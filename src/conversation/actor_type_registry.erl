@@ -8,21 +8,21 @@
 %%% Maps actor type names to actor type processes.
 %%% Note: actor type processes != actor instances!
 
-spawn_child(ActorTypeName, ProcDict) ->
-  Result = gen_server:start(actor_type, [ActorTypeName], []),
+spawn_child(ActorModuleName, ProcDict) ->
+  Result = gen_server:start(actor_type, [ActorModuleName, ProtocolRoleMap], []),
   case Result of
-    {ok, Pid} -> orddict:store(ActorTypeName, Pid, ProcDict);
+    {ok, Pid} -> orddict:store(ActorModuleName, Pid, ProcDict);
     Error ->
       % For now, if there's a problem starting the process, then
       % log the error and do nothing. It might be worth retrying
       % later on.
-      error_logger:error_msg("Error starting process for actor type ~s: ~p~n",
-                             [ActorTypeName, Error]),
+      error_logger:error_msg("Error starting process for actor type ~p: ~p~n",
+                             [ActorModuleName, Error]),
       ProcDict
   end.
 
 spawn_children(ActorTypes) ->
-  lists:foldl(fun(ActorType, ProcDict) ->
+  lists:foldl(fun({ActorModuleName, _ActorName, ProtocolRoleMap, ProcDict) ->
                   spawn_child(ActorType, ProcDict) end,
               orddict:new(),
               ActorTypes).
@@ -63,8 +63,8 @@ handle_invite_actor(ActorTypeName, ProtocolName, RoleName, ConversationID,
 %% OTP Callback Functions
 
 % Spawn processes for each of the protocol names
-init([ActorTypes]) ->
-  ActorTypeRegistry = spawn_children(ActorTypes),
+init([ActorTypes, Config]) ->
+  ActorTypeRegistry = spawn_children(Config),
   {ok, ActorTypeRegistry}.
 
 handle_call({get_process_id, ActorTypeName}, _From, ActorTypeRegistry) ->
@@ -105,6 +105,14 @@ terminate(Reason, _State) ->
   ok.
 
 
+with_actor_process(ActorTypeName, Func) ->
+  ActorPidRes = gen_server:call(?ACTOR_TYPE_REGISTRY,
+                                {get_process_id, ActorTypeName}),
+  case ActorPidRes of
+    {ok, ProcessPid} -> Func(ProcessPid);
+    Err -> Err
+  end.
+
 % Internal API
 
 % Invite an actor to fulfil a role
@@ -112,4 +120,10 @@ invite_actor_to_role(ActorTypeName, ProtocolName, RoleName, ConversationID) ->
   gen_server:call(?ACTOR_TYPE_REGISTRY,
                   {invite_actor, ActorTypeName, ProtocolName, RoleName,
                    ConversationID}).
+
+% Gets the protocol-role mapping for a given actor type
+get_protocol_role_map(ActorTypeName) ->
+  Func = fun (ProcessPid) ->
+             gen_server:call(ProcessPid, get_protocol_role_map) end,
+  with_actor_process(ActorTypeName, Func).
 

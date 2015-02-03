@@ -15,4 +15,3 @@ config() ->
   [{buyer1, "Buyer1", [{"TwoBuyers", "A"}]},
    {buyer2, "Buyer2", [{"TwoBuyers", "B"}]},
    {seller, "Seller", [{"TwoBuyers", "S"}]}].
-

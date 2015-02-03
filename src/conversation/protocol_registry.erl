@@ -11,6 +11,19 @@
 % kernel?
 
 
+% Find the actors which are involved in the protocol, and devise a mapping
+% from roles to actor types.
+
+generate_role_actor_map(ProtocolName, Config) ->
+  lists:foldl(fun({ActorModuleName, _ActorName, ProtocolMap}, Dict) ->
+                  FindRes = lists:keyfind(1, ProtocolName, ProtocolMap),
+                  case FindRes of
+                    {ProtocolName, RoleName} ->
+                      % Great, we've found it -- add to the dict
+                      orddict:store(RoleName, ActorModuleName, Dict);
+                    error -> Dict
+                  end end, orddict:new(), Config).
+
 % Spawns a child, appending the ProtocolName |-> Pid mapping
 % to the given dictionary.
 % If there's an error starting, then we ignore it for now.
@@ -19,8 +32,9 @@
 % Protocol Name: Name of the protocol
 % RoleDict: Role -> Role AST mapping
 % ProcDict: Dict of protocol processes
-spawn_child(ProtocolName, RoleDict, ProcDict) ->
-  Result = gen_server:start("protocol_process", [ProtocolName, RoleDict], []),
+spawn_child(ProtocolName, RoleDict, ProcDict, Config) ->
+  RoleActorMap = generate_role_actor_map(ProtocolName, Config),
+  Result = gen_server:start(protocol_type, [ProtocolName, RoleDict, RoleActorMap], []),
   case Result of
     {ok, Pid} -> orddict:store(ProtocolName, Pid, ProcDict);
     Error ->
@@ -33,9 +47,9 @@ spawn_child(ProtocolName, RoleDict, ProcDict) ->
   end.
 
 
-spawn_children(ProtocolMappings) ->
+spawn_children(ProtocolMappings, Config) ->
   lists:foldl(fun(ProtocolName, RoleDict, ProcDict) ->
-                  spawn_child(ProtocolName, RoleDict, ProcDict) end,
+                  spawn_child(ProtocolName, RoleDict, ProcDict, Config) end,
               orddict:new(),
               ProtocolMappings).
 
@@ -43,8 +57,8 @@ spawn_children(ProtocolMappings) ->
 %% OTP Callback Functions
 
 % Spawn processes for each of the protocol names
-init([ProtocolMappings]) ->
-  ProtocolRegistry = spawn_children(ProtocolMappings),
+init([ProtocolMappings, Config]) ->
+  ProtocolRegistry = spawn_children(ProtocolMappings, Config),
   {ok, ProtocolRegistry}.
 
 handle_call({get_process_id, ProtocolName}, _From, ProtocolRegistry) ->
