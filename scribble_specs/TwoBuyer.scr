@@ -9,7 +9,7 @@ global protocol TwoBuyers(role A, role B, role S) {
 	// TODO: Loop recursion here
 	share(Integer) from A to B;
 	choice at B {
-		accept(address:String) from B to A, S;
+		accept(String) from B to A, S;
 		date(String) from S to B;
 	} or {
 		retry() from B to A, S;

@@ -76,7 +76,7 @@ init([Module, UserArgs]) ->
 
 % We shouldn't have any synchronous calls -- log and ignore.
 handle_call(Request, _From, State) ->
-  actor_warn("Received unhandled ynchronous message ~p", [Request], State),
+  actor_warn("Received unhandled synchronous message ~p", [Request], State),
   {noreply, State}.
 
 
@@ -88,7 +88,7 @@ handle_cast(Msg = {message, _, Sender, Op, Types, Payload}, State) ->
   UserState = State#actor_state.user_state,
   % TODO: ssactor_handle_message currently just returns a new state.
   % Should we have some more complex callback here instead?
-  NewState = Module:ssactor_handle_message(Sender, Op, Types, Payload, UserState),
+  NewState = Module:ssactor_handle_message(Sender, Op, Types, Payload, UserState, self()),
   {noreply, NewState};
 handle_cast(Msg, State) ->
   actor_warn("Received unhandled asynchronous message ~p", [Msg], State),

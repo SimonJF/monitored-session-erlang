@@ -7,7 +7,7 @@ local protocol TwoBuyers at B(role A,role B,role S) {
 	quote(Integer) from S;
 	share(Integer) from A;
 	choice at B {
-		accept(address:String) to A,S;
+		accept(String) to A,S;
 		date(String) from S;
 	} or {
 		retry() to A,S;
