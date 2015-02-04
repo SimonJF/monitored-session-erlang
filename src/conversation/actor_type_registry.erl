@@ -8,7 +8,7 @@
 %%% Maps actor type names to actor type processes.
 %%% Note: actor type processes != actor instances!
 
-spawn_child(ActorModuleName, ProcDict) ->
+spawn_child(ActorModuleName, ProtocolRoleMap, ProcDict) ->
   Result = gen_server:start(actor_type, [ActorModuleName, ProtocolRoleMap], []),
   case Result of
     {ok, Pid} -> orddict:store(ActorModuleName, Pid, ProcDict);
@@ -21,11 +21,11 @@ spawn_child(ActorModuleName, ProcDict) ->
       ProcDict
   end.
 
-spawn_children(ActorTypes) ->
-  lists:foldl(fun({ActorModuleName, _ActorName, ProtocolRoleMap, ProcDict) ->
-                  spawn_child(ActorType, ProcDict) end,
+spawn_children(Config) ->
+  lists:foldl(fun({ActorModuleName, _ActorName, ProtocolRoleMap}, ProcDict) ->
+                  spawn_child(ActorModuleName, ProtocolRoleMap, ProcDict) end,
               orddict:new(),
-              ActorTypes).
+              Config).
 
 
 % Gets the PID for an actor type process with the given name
@@ -63,7 +63,7 @@ handle_invite_actor(ActorTypeName, ProtocolName, RoleName, ConversationID,
 %% OTP Callback Functions
 
 % Spawn processes for each of the protocol names
-init([ActorTypes, Config]) ->
+init([Config]) ->
   ActorTypeRegistry = spawn_children(Config),
   {ok, ActorTypeRegistry}.
 
@@ -126,4 +126,12 @@ get_protocol_role_map(ActorTypeName) ->
   Func = fun (ProcessPid) ->
              gen_server:call(ProcessPid, get_protocol_role_map) end,
   with_actor_process(ActorTypeName, Func).
+
+
+register_actor_instance(ActorType, ActorPid) ->
+  gen_server:call(?ACTOR_TYPE_REGISTRY, {register_actor, ActorType, ActorPid}).
+
+deregister_actor_instance(ActorType, ActorPid) ->
+  gen_server:call(?ACTOR_TYPE_REGISTRY, {deregister_actor, ActorType, ActorPid}).
+
 

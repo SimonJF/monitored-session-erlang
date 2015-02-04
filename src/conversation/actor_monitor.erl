@@ -38,7 +38,7 @@
 
 
 log_msg(Func, Format, Args, State) ->
-  InfoStr = "Actor ~s, actor PID ~p, monitor instance ~p.",
+  InfoStr = "Actor ~p, actor PID ~p, monitor instance ~p.",
   InfoArgs = [State#conv_state.actor_type_name,
               State#conv_state.actor_pid,
               self()],

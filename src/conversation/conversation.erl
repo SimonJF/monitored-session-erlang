@@ -26,13 +26,6 @@ initialise(SpecDir, Config) ->
   ok.
 
 
-register_actor_instance(ActorType, ActorPid) ->
-  gen_server:call(?ACTOR_TYPE_REGISTRY, {register_actor, ActorType, ActorPid}).
-
-deregister_actor_instance(ActorType, ActorPid) ->
-  gen_server:call(?ACTOR_TYPE_REGISTRY, {deregister_actor, ActorType, ActorPid}).
-
-
 % Internal functions
 
 send(MonitorPID, Recipients, MessageName, Types, Payload)  ->
@@ -55,6 +48,3 @@ start_conversation(_MonitorPID, ProtocolName) ->
       end;
     Err -> Err
   end.
-
-%spawn_session_actor(ActorModule, Args) ->
-%  gen_server:start(session_actor, [ActorModule,
