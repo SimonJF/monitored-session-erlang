@@ -6,6 +6,9 @@
 main() ->
   % Initialise the conversation runtime.
   conversation:initialise(?SPEC_DIR, two_buyer_conf:config()),
-  {ok, _ServerPid} = session_actor:spawn(server, []),
+  io:format("Initialised successfully~n"),
+  {ok, _ServerPid} = session_actor:spawn(seller, []),
+  io:format("Spawned server successfully~n"),
   {ok, _Buyer2Pid} = session_actor:spawn(buyer2, []),
-  {ok, _Buyer1Pid} = session_actor:spawn(buyer1, []).
+  {ok, _Buyer1Pid} = session_actor:spawn(buyer1, []),
+  ok.

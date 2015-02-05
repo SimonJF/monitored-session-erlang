@@ -85,6 +85,7 @@ init([ActorPid, ActorTypeName, ProtocolRoleMap]) ->
   % Firstly, create a fresh state with all of the information we've been given
   State = fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap),
   % Next, we load the monitors.
+  io:format("ProtocolRoleMap: ~p~n", [ProtocolRoleMap]),
   MonitorDict = load_monitors(orddict:to_list(ProtocolRoleMap),
                               orddict:new(),
                               State),

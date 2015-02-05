@@ -13,7 +13,7 @@
 
 ssactor_init(_Args) ->
   % Start the conversation
-  conversation:start_conversation(self(), "TwoBuyers"), % TODO: self() needs to be monitor PID -- we don't have that
+%  conversation:start_conversation(self(), "TwoBuyers"), % TODO: self() needs to be monitor PID -- we don't have that
   no_state. % We don't need no state round these parts
 
 ssactor_handle_msg(SenderRole, "quote", _, [QuoteInt], _State, Monitor) ->

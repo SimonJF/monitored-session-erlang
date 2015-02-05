@@ -74,16 +74,16 @@ handle_call({get_process_id, ActorTypeName}, _From, ActorTypeRegistry) ->
   {reply, Result, ActorTypeRegistry};
 handle_call({register_actor, ActorType, ActorInstancePid}, _From, ActorTypeRegistry) ->
   handle_register_actor(ActorType, ActorInstancePid, ActorTypeRegistry),
-  {noreply, ActorTypeRegistry};
+  {reply, ok, ActorTypeRegistry};
 handle_call({deregister_actor, ActorType, ActorInstancePid}, _From, ActorTypeRegistry) ->
   handle_deregister_actor(ActorType, ActorInstancePid, ActorTypeRegistry),
-  {noreply, ActorTypeRegistry};
+  {reply, ok, ActorTypeRegistry};
 handle_call({invite_actor, ActorTypeName, ProtocolName, RoleName, CID},
             _From, ActorTypeRegistry) ->
   handle_invite_actor(ActorTypeName, ProtocolName, RoleName, CID, ActorTypeRegistry);
 handle_call(Other, _From, ActorTypeRegistry) ->
   error_logger:error_msg("Unknown call message in ActorTypeRegistry: ~p~n", [Other]),
-  {noreply, ActorTypeRegistry}.
+  {reply, ok, ActorTypeRegistry}.
 
 % There shouldn't really be any async messsages?
 handle_cast(Other, ActorTypeRegistry) ->
@@ -110,7 +110,10 @@ with_actor_process(ActorTypeName, Func) ->
                                 {get_process_id, ActorTypeName}),
   case ActorPidRes of
     {ok, ProcessPid} -> Func(ProcessPid);
-    Err -> Err
+    Err ->
+      error_logger:error_msg("ERROR: Could not find actor type process for AT ~p.~n",
+                            [ActorTypeName]),
+      Err
   end.
 
 % Internal API

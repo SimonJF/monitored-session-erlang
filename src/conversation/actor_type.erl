@@ -48,24 +48,26 @@ init([ActorTypeName, ProtocolRoleMap]) ->
                                  protocol_role_map=orddict:from_list(ProtocolRoleMap),
                                  actor_instances=[]},
   {ok, ActorState}.
+
+
 handle_call({register_actor, ActorInstancePid}, _From, State) ->
   NewState = add_actor_instance(ActorInstancePid, State),
-  {noreply, NewState};
+  {reply, ok, NewState};
 handle_call({deregister_actor, ActorInstancePid}, _From, State) ->
   NewState = remove_actor_instance(ActorInstancePid, State),
-  {noreply, NewState};
+  {reply, ok, NewState};
 handle_call({invitation, ProtocolName, RoleName, ConversationID}, _From, State) ->
   handle_invite_actor(ProtocolName, RoleName, ConversationID, State);
 handle_call(get_protocol_role_map, _From, State) ->
   {reply, State#actor_type_state.protocol_role_map, State};
 handle_call(Other, _From, State) ->
   error_logger:error_msg("Unknown call message in State: ~p~n", [Other]),
-  {noreply, State}.
+  {reply, ok, State}.
 
 % There shouldn't really be any async messsages?
 handle_cast(Other, State) ->
   error_logger:error_msg("Unknown cast message in State: ~p~n", [Other]),
-  {noreply, State}.
+  {reply, State}.
 
 % Nor info messages
 handle_info(Other, State) ->
