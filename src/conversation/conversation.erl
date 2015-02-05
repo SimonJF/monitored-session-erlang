@@ -11,7 +11,7 @@
 
 % Initialises the system. Must be called prior to doing anything else!
 initialise(SpecDir, Config) ->
-  ProtocolMappings = protocol_loader:local_protocol_files(SpecDir),
+  ProtocolMappings = protocol_loader:load_protocol_files(SpecDir),
   % Start the protocol registry, and register it to the atom protocol_registry.
   % This will also start all of the protocol processes.
   {ok, _PRPid} = gen_server:start_link({local, ?PROTOCOL_REGISTRY},
@@ -22,7 +22,7 @@ initialise(SpecDir, Config) ->
   {ok, _ATRPid} = gen_server:start_link({local, ?ACTOR_TYPE_REGISTRY},
                                         actor_type_registry, [Config],
                                         []),
-  error_logger:info_message("Successfully initialised conversation system.~n", []),
+  error_logger:info_msg("Successfully initialised conversation system.~n", []),
   ok.
 
 

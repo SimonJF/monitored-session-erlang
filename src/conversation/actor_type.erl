@@ -25,7 +25,7 @@ handle_invite_actor(ProtocolName, RoleName, ConversationID, State) ->
 
 handle_invite_inner([], ProtocolName, RoleName, _) ->
   % Booo, nothing available
-  error_logger:warn_message("Unable to find endpoint for protocol~s role ~s.~n",
+  error_logger:warning_msg("Unable to find endpoint for protocol~s role ~s.~n",
                             [ProtocolName, RoleName]),
   {error, no_registered_actor};
 handle_invite_inner([Instance|Instances], ProtocolName, RoleName, ConversationID) ->
@@ -36,7 +36,7 @@ handle_invite_inner([Instance|Instances], ProtocolName, RoleName, ConversationID
     % Wahey, it's added.
     ok -> ok;
     {error, Err} ->
-      error_logger:info_message("PID ~p could not fulfil role ~s: error ~w.~n",
+      error_logger:info_msg("PID ~p could not fulfil role ~s: error ~w.~n",
                                 [Instance, RoleName, Err]),
       handle_invite_inner(Instances, ProtocolName, RoleName, ConversationID)
   end.

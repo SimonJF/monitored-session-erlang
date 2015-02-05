@@ -16,12 +16,16 @@
 
 generate_role_actor_map(ProtocolName, Config) ->
   lists:foldl(fun({ActorModuleName, _ActorName, ProtocolMap}, Dict) ->
-                  FindRes = lists:keyfind(1, ProtocolName, ProtocolMap),
+                  FindRes = lists:keyfind(ProtocolName, 1, ProtocolMap),
                   case FindRes of
                     {ProtocolName, RoleName} ->
                       % Great, we've found it -- add to the dict
                       orddict:store(RoleName, ActorModuleName, Dict);
-                    error -> Dict
+                    false ->
+                      error_logger:warning_msg("Could not find protocol ~s in protocol map " ++
+                                                "for actor ~p.~n",
+                                                [ProtocolName, ActorModuleName]),
+                      Dict
                   end end, orddict:new(), Config).
 
 % Spawns a child, appending the ProtocolName |-> Pid mapping
@@ -48,7 +52,7 @@ spawn_child(ProtocolName, RoleDict, ProcDict, Config) ->
 
 
 spawn_children(ProtocolMappings, Config) ->
-  lists:foldl(fun(ProtocolName, RoleDict, ProcDict) ->
+  orddict:fold(fun(ProtocolName, RoleDict, ProcDict) ->
                   spawn_child(ProtocolName, RoleDict, ProcDict, Config) end,
               orddict:new(),
               ProtocolMappings).

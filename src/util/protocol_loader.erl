@@ -12,7 +12,8 @@ extract_protocols({module, _, _, _, Protocols}) ->
                   {true, {ProtocolName, ProjRoleName, Protocol}};
                 _Other ->
                   error_logger:warning_msg("WARN: Couldn't extract protocol of wrong type ~p~n",
-                                           [Protocol])
+                                           [Protocol]),
+                  false
               end end, Protocols);
 extract_protocols(Other) ->
   error_logger:warning_msg("WARN: Scribble file without top-level module, ignoring: ~p~n", [Other]),
@@ -28,18 +29,18 @@ extract_protocols(Other) ->
 % Orddict1 = Orddict2 = orddict()
 
 append_protocol_roles(ProtocolEntries, Dict) ->
-  lists:foldl(fun({ProtocolName, RoleName, ProtocolAST}) ->
+  lists:foldl(fun({ProtocolName, RoleName, ProtocolAST}, RunningPRD) ->
                   % First, get the ProtocolName |-> RoleSpec dict
-                  ProtocolRoleDictRes = orddict:find(ProtocolName, Dict),
+                  ProtocolRoleDictRes = orddict:find(ProtocolName, RunningPRD),
                   case ProtocolRoleDictRes of
                     {ok, ProtocolRoleDict} ->
                       % Now, update the PRD with the new role.
                       NewPRD = orddict:store(RoleName, ProtocolAST, ProtocolRoleDict),
-                      orddict:store(ProtocolName, NewPRD);
+                      orddict:store(ProtocolName, NewPRD, RunningPRD);
                     error ->
                       % Otherwise, create a new one and store it
                       NewPRD = orddict:store(RoleName, ProtocolAST, orddict:new()),
-                      orddict:store(ProtocolName, NewPRD)
+                      orddict:store(ProtocolName, NewPRD, RunningPRD)
                   end end, Dict, ProtocolEntries).
 
 

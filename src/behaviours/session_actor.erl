@@ -46,13 +46,13 @@ log_msg(Func, Format, Args, State) ->
   Func(Format ++ "~n" ++ InfoStr, Args ++ InfoArgs).
 
 actor_warn(Format, Args, State) ->
-  log_msg(fun error_logger:warn_message/2, Format, Args, State).
+  log_msg(fun error_logger:warning_msg/2, Format, Args, State).
 
 actor_error(Format, Args, State) ->
-  log_msg(fun error_logger:error_message/2, Format, Args, State).
+  log_msg(fun error_logger:error_msg/2, Format, Args, State).
 
 actor_info(Format, Args, State) ->
-  log_msg(fun error_logger:info_message/2, Format, Args, State).
+  log_msg(fun error_logger:info_msg/2, Format, Args, State).
 
 
 % gen_server callbacks

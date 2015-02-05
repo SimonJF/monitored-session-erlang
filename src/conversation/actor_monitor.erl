@@ -46,14 +46,14 @@ log_msg(Func, Format, Args, State) ->
 
 % Warn function. It was ad-hoc, horrific, and verbos before, so standardise it.
 monitor_warn(Format, Args, State) ->
-  log_msg(fun error_logger:warn_message/2, Format, Args, State).
+  log_msg(fun error_logger:warning_msg/2, Format, Args, State).
 
 % Error function. Same as warn, really
 monitor_error(Format, Args, State) ->
-  log_msg(fun error_logger:error_message/2, Format, Args, State).
+  log_msg(fun error_logger:error_msg/2, Format, Args, State).
 
 monitor_info(Format, Args, State) ->
-  log_msg(fun error_logger:info_message/2, Format, Args, State).
+  log_msg(fun error_logger:info_msg/2, Format, Args, State).
 
 fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap) ->
   #conv_state{actor_pid=ActorPid,
