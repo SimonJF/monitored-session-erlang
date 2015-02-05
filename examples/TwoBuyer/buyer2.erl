@@ -7,12 +7,12 @@
 %   Server -> Buyer 2 (quote(Int))
 %   Buyer 1 -> Buyer 2 (share(Int))
 %   Choice:
-%     Buyer 2 -> Buyer 1 (accept(String))
+%     Buyer 2 -> Buyer 1, Server (accept(String))
 %       Server -> Buyer 2 (date(String))
 %     Buyer 2 -> Buyer 1, Server (retry())
 %     Buyer 2 -> Buyer 1, Server (quit())
 
-init(_Args) -> no_state. % We don't need no state round these parts
+ssactor_init(_Args) -> no_state. % We don't need no state round these parts
 
 ssactor_handle_msg(SenderRole, "quote", _, [QuoteInt], _State, _Monitor) ->
   tbp_logger:info(buyer2, "Received quote of ~p from ~s", [QuoteInt, SenderRole]),
@@ -22,12 +22,12 @@ ssactor_handle_msg(SenderRole, "share", _, [Share], _State, Monitor) ->
   if Share >= ?PRICE_THRESHOLD ->
        % Nah, we aint paying that
        tbp_logger:info(buyer2, "Rejected share quote (threshold ~p)", [?PRICE_THRESHOLD]),
-       conversation:send(Monitor, ["buyer2"], "quit", [], []);
+       conversation:send(Monitor, ["A", "S"], "quit", [], []);
      Share < ?PRICE_THRESHOLD ->
        % We can afford it: accept, send address to buyer2 and server,
        % and retrieve the delivery date from the server
        tbp_logger:info(buyer2, "Accepted share quote (threshold ~p)", [?PRICE_THRESHOLD]),
-       conversation:send(Monitor, ["buyer2", "Server"], "accept",
+       conversation:send(Monitor, ["A", "S"], "accept",
                          ["String"], ["Informatics Forum"])
   end,
   no_state;

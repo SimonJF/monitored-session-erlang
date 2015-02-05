@@ -34,7 +34,7 @@
 %   NewState
 behaviour_info(callbacks) ->
     [{ssactor_init,1},
-     {ssactor_handle_msg, 5}];
+     {ssactor_handle_msg, 6}];
 behaviour_info(_Other) ->
     undefined.
 
@@ -113,5 +113,5 @@ terminate(Reason, State) ->
 
 % Public API
 spawn(ModuleName, Args) ->
-  gen_server:start(ModuleName, Args, []).
+  gen_server:start(session_actor, [ModuleName, Args], []).
 

@@ -11,7 +11,10 @@
 %     Buyer2 -> Buyer 1 (retry())
 %     Buyer2 -> Buyer 1 (quit())
 
-init(_Args) -> no_state. % We don't need no state round these parts
+ssactor_init(_Args) ->
+  % Start the conversation
+  conversation:start_conversation(self(), "TwoBuyers"), % TODO: self() needs to be monitor PID -- we don't have that
+  no_state. % We don't need no state round these parts
 
 ssactor_handle_msg(SenderRole, "quote", _, [QuoteInt], _State, Monitor) ->
   tbp_logger:info(buyer1, "Received quote of ~p from ~s", [QuoteInt, SenderRole]),

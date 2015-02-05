@@ -1,4 +1,4 @@
--module(three_buyer_config).
+-module(two_buyer_conf).
 -export([config/0]).
 % Config file
 %
