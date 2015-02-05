@@ -60,7 +60,7 @@ fresh_state(ProtocolName, RoleNames) ->
   % Add the names to the map, so we can ensure we accept only roles which are
   % meant to be accepted...
   EmptyMap = orddict:from_list(lists:map(fun(RoleName) ->
-                                             {RoleName, undefined} end,
+                                             {RoleName, not_filled} end,
                                         RoleNames)),
   #conv_inst_state{protocol_name=ProtocolName, role_mapping=EmptyMap}.
 

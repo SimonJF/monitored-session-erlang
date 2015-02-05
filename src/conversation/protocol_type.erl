@@ -56,7 +56,8 @@ invite_actors_inner([Role|Roles], ConversationID, State) ->
 
 invite_actor_role(RoleName, ConversationID, State) ->
   ProtocolName = protocol_name(State),
-  ActorTypeRes = orddict:fetch(RoleName, role_actor_mapping),
+  RoleActorMapping = State#protocol_state.role_actor_mapping,
+  ActorTypeRes = orddict:find(RoleName, RoleActorMapping),
   case ActorTypeRes of
     {ok, ActorType} ->
       actor_type_registry:invite_actor_to_role(ActorType,

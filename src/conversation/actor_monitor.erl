@@ -110,7 +110,7 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
     {_, true} -> {error, already_fulfilled};
     {{ok, RoleRes}, false} when RoleRes == RoleName ->
       % We can fulfil it!
-      NewActiveProtocols = bidirectional_map:store(ProtocolName, ConversationID),
+      NewActiveProtocols = bidirectional_map:store(ProtocolName, ConversationID, ActiveProtocols),
       % TODO: Try-Catch round this, in case the conversation goes away
       Res = gen_server:call(ConversationID, {accept_invitation, RoleName}),
       case Res of
@@ -146,7 +146,7 @@ handle_terminate_conversation(ConversationID, State) ->
   NewActiveProtocols = bidirectional_map:remove_right(ConversationID, ActiveProtocols),
   NewState = State#conv_state{active_protocols=NewActiveProtocols},
   monitor_info("Exiting conversation ~p.~n", [ConversationID], State),
-  {noreply, NewState}.
+  {reply, ok, NewState}.
 
 
 % Here, we deliver the message to the attached actor (which is a gen_server).
@@ -194,7 +194,6 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
   % Get the protocol name for the conversation
   ActiveProtocols = State#conv_state.active_protocols,
   ProtocolRoleMap = State#conv_state.protocol_role_map,
-  CurrentProtocol = State#conv_state.current_protocol,
   % TODO: Set CurrentProtocol if it is undefined
   ConversationProtocolResult = bidirectional_map:fetch_right(ConversationID, ActiveProtocols),
   MonitorFunction = case CommType of
@@ -202,7 +201,10 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
                       recv -> fun monitor:recv/2
                     end,
   case ConversationProtocolResult of
-    {ok, ProtocolName} when CurrentProtocol == ProtocolName ->
+    {ok, ProtocolName} ->
+      % Set the current protocol, so that it can be used when sending
+      % messages later on.
+      NewState = State#conv_state{current_protocol=ProtocolName},
       CurrentRole = orddict:fetch(ProtocolName, ProtocolRoleMap),
       % Find the monitor instance for the current role
       MonitorInstance = orddict:find(CurrentRole, Monitors),
@@ -212,15 +214,15 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
           case MonitorResult of
             {ok, NewMonitorInstance} ->
               NewMonitors = orddict:store(CurrentRole, NewMonitorInstance, Monitors),
-              NewState = State#conv_state{monitors=NewMonitors},
+              NewState1 = NewState#conv_state{monitors=NewMonitors},
               % Do delegation stuff here
               % If we're sending, then pop it to the conversation instance process
               % If we're receiving, then delegate to user session actor code.
               case CommType of
                 send -> deliver_outgoing_message(MessageData, ConversationID);
-                recv -> deliver_incoming_message(MessageData, NewState)
+                recv -> deliver_incoming_message(MessageData, NewState1)
               end,
-              {noreply, NewState};
+              {noreply, NewState1};
             {error, Err} ->
               monitor_warn("Monitor failed when processing message ~p (~p). Error: ~p~n",
                            [MessageData, CommType, Err], State),
@@ -230,13 +232,6 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
           monitor_warn("Could not find monitor for role ~s.~n", [CurrentRole], State),
           {noreply, State}
       end;
-    {ok, ProtocolName} when CurrentProtocol =/= ProtocolName ->
-      % Our current protocol doesn't match the protocol associated with the message.
-      % Ignore for now, but will have to do something with this later.
-      % TODO: Receive should set this, send needs to choose monitor based on it
-      monitor_warn("Could not handle message ~p due to protocol mismatch (~p vs running ~p).",
-                   [MessageData, ProtocolName, CurrentProtocol], State),
-      {noreply, State};
     error ->
       monitor_error("Could not find protocol for conversation ID ~p.",
                     [ConversationID], State),

@@ -58,13 +58,13 @@ actor_info(Format, Args, State) ->
 % gen_server callbacks
 init([Module, UserArgs]) ->
   ProtocolRoleMap = actor_type_registry:get_protocol_role_map(Module),
-  actor_type_registry:register_actor_instance(Module, self()),
   MonitorProcess = gen_server:start_link(actor_monitor,
                                          [self(),
                                           Module,
                                           ProtocolRoleMap], []),
   case MonitorProcess of
     {ok, MonitorPid} ->
+      actor_type_registry:register_actor_instance(Module, MonitorPid),
       UserState = Module:ssactor_init(UserArgs),
       {ok, #actor_state{monitor_pid=MonitorPid,
                         user_state=UserState,
@@ -108,7 +108,8 @@ code_change(_PreviousVersion, State, _Extra) ->
 terminate(Reason, State) ->
   actor_error("Actor terminating for reason ~w", [Reason], State),
   Module = State#actor_state.actor_type_name,
-  actor_type_registry:deregister_actor_instance(Module, self()),
+  MonitorPID = State#actor_state.monitor_pid,
+  actor_type_registry:deregister_actor_instance(Module, MonitorPID),
   ok.
 
 % Public API

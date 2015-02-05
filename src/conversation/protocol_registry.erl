@@ -101,7 +101,7 @@ with_protocol_process(ProtocolName, Func) ->
   ProtocolPidRes = get_protocol_pid(ProtocolName),
   case ProtocolPidRes of
     {ok, ProtocolPid} ->
-      Func(ProtocolPid);
+      {ok, Func(ProtocolPid)};
     error -> {error, bad_protocol_name} % Couldn't find the protocol process
   end.
 

@@ -67,7 +67,7 @@ handle_call(Other, _From, State) ->
 % There shouldn't really be any async messsages?
 handle_cast(Other, State) ->
   error_logger:error_msg("Unknown cast message in State: ~p~n", [Other]),
-  {reply, State}.
+  {noreply, State}.
 
 % Nor info messages
 handle_info(Other, State) ->
