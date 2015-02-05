@@ -12,7 +12,7 @@
 %     Buyer 2 -> Buyer 1, Server (retry())
 %     Buyer 2 -> Buyer 1, Server (quit())
 
-ssactor_init(_Args) -> no_state. % We don't need no state round these parts
+ssactor_init(_Args, _Monitor) -> no_state. % We don't need no state round these parts
 
 ssactor_handle_msg(SenderRole, "quote", _, [QuoteInt], _State, _Monitor) ->
   tbp_logger:info(buyer2, "Received quote of ~p from ~s", [QuoteInt, SenderRole]),

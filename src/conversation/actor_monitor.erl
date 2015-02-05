@@ -166,6 +166,15 @@ handle_incoming_message(Other, _CID, State) ->
   monitor_warn("handle_incoming_message called for non_message ~p", [Other], State),
   {noreply, State}.
 
+% FIXME: At the moment, the current protocol will be undefined if the actor hasn't received
+% a message yet. This is a bit problematic for the conversation initiator!
+% I think the easiest thing to do at least while we're debugging this monstrosity
+% is to just hack in a "set role" thing which must be called after conversation
+% initiation to start off with.
+% Alternatively we could Do It Properly and do the proper session initiation dance
+% where we specify that the actor should fulfil a certain role in the protocol to start.
+% In fact, that would likely be the best course of action. It'd mean a bit of tinkering
+% with the invitation mechanism (but minimal, really). Yeah, I'll do that tomorrow morning.
 handle_outgoing_message(Recipients, MessageName, Types, Payload, State) ->
   % Firstly, we need to get the conversation ID, based on the current role
   CurrentProtocol = State#conv_state.current_protocol,
@@ -178,11 +187,11 @@ handle_outgoing_message(Recipients, MessageName, Types, Payload, State) ->
       MessageData = message:message(make_ref(), RoleName, Recipients,
                                     MessageName, Types, Payload),
       monitor_msg(send, MessageData, ConversationID, State);
-    {{error, Err}, _} ->
+    {Err, _} ->
       monitor_warn("Couldn't find conversation for active protocol ~s.~n",
                    [CurrentProtocol], State),
       {error, Err};
-    {_, {error, Err}} ->
+    {_, Err} ->
       monitor_warn("Couldn't find current role for active protocol ~s.~n",
                    [CurrentProtocol], State),
       {error, Err}

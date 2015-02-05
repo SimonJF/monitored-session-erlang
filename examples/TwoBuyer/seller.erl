@@ -13,7 +13,7 @@
 %   Buyer2 -> seller (retry())
 %   Buyer2 -> seller (quit())
 
-ssactor_init(_Args) -> no_state. % We don't need no state round these parts
+ssactor_init(_Args, _Monitor) -> no_state. % We don't need no state round these parts
 
 ssactor_handle_msg(SenderRole, "title", _, [Title], _State, Monitor) ->
   tbp_logger:info(seller, "Received title ~s from ~s", [Title, SenderRole]),

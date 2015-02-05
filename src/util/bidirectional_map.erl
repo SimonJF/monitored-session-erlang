@@ -23,6 +23,12 @@ fetch_left(Left, {LeftMap, _}) ->
 fetch_right(Right, {_, RightMap}) ->
   orddict:fetch(Right, RightMap).
 
+find_left(Left, {LeftMap, _}) ->
+  orddict:find(Left, LeftMap).
+
+find_right(Right, {_, RightMap}) ->
+  orddict:find(Right, RightMap).
+
 remove_left(Left, {LeftMap, RightMap}) ->
   LeftMap1 = orddict:erase(Left, LeftMap),
   RightMap1 = orddict:filter(fun(_, V) -> V =/= Left end, RightMap),

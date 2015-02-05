@@ -33,7 +33,7 @@
 %   State ->
 %   NewState
 behaviour_info(callbacks) ->
-    [{ssactor_init,1},
+    [{ssactor_init,2},
      {ssactor_handle_msg, 6}];
 behaviour_info(_Other) ->
     undefined.
@@ -65,7 +65,7 @@ init([Module, UserArgs]) ->
   case MonitorProcess of
     {ok, MonitorPid} ->
       actor_type_registry:register_actor_instance(Module, MonitorPid),
-      UserState = Module:ssactor_init(UserArgs),
+      UserState = Module:ssactor_init(UserArgs, MonitorPid),
       {ok, #actor_state{monitor_pid=MonitorPid,
                         user_state=UserState,
                         actor_module=Module}};
