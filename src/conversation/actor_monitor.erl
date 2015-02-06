@@ -161,7 +161,11 @@ deliver_outgoing_message(Msg, ConversationID) ->
 % then grabs the monitor, then checks / updates the monitor state.
 handle_incoming_message({message, MessageData}, ConversationID, State) ->
   monitor_info("Handling incoming message ~p", [MessageData], State),
-  monitor_msg(send, MessageData, ConversationID, State);
+  Res = monitor_msg(send, MessageData, ConversationID, State),
+  case Res of
+    {ok, NewState} -> {noreply, NewState};
+    _Err -> {noreply, State} % assuming the error has been logged already
+  end;
 handle_incoming_message(Other, _CID, State) ->
   monitor_warn("handle_incoming_message called for non_message ~p", [Other], State),
   {noreply, State}.
@@ -186,15 +190,19 @@ handle_outgoing_message(Recipients, MessageName, Types, Payload, State) ->
     {{ok, ConversationID}, {ok, RoleName}} ->
       MessageData = message:message(make_ref(), RoleName, Recipients,
                                     MessageName, Types, Payload),
-      monitor_msg(send, MessageData, ConversationID, State);
-    {Err, _} ->
+      MonitorRes = monitor_msg(send, MessageData, ConversationID, State),
+      case MonitorRes of
+        {ok, NewState} -> {reply, ok, NewState};
+        Err -> {reply, Err, State}
+      end;
+    {Err, ok} ->
       monitor_warn("Couldn't find conversation for active protocol ~s.~n",
                    [CurrentProtocol], State),
-      {error, Err};
+      {reply, Err, State};
     {_, Err} ->
       monitor_warn("Couldn't find current role for active protocol ~s.~n",
                    [CurrentProtocol], State),
-      {error, Err}
+      {reply, Err, State}
   end.
 
 
@@ -231,20 +239,20 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
                 send -> deliver_outgoing_message(MessageData, ConversationID);
                 recv -> deliver_incoming_message(MessageData, NewState1)
               end,
-              {noreply, NewState1};
+              {ok, NewState1};
             {error, Err} ->
               monitor_warn("Monitor failed when processing message ~p (~p). Error: ~p~n",
                            [MessageData, CommType, Err], State),
-              {noreply, State}
+              {error, Err}
           end;
         error ->
           monitor_warn("Could not find monitor for role ~s.~n", [CurrentRole], State),
-          {noreply, State}
+          {error, bad_monitor}
       end;
     error ->
       monitor_error("Could not find protocol for conversation ID ~p.",
                     [ConversationID], State),
-      {noreply, State}
+      {error, bad_protocol}
   end.
 
 
@@ -260,7 +268,7 @@ handle_call({send_msg, Recipients, MessageName, Types, Payload}, _Sender, State)
 handle_call(Other, Sender, State) ->
   monitor_warn("Received unhandled synchronous message ~p from PID ~p.",
                [Other, Sender], State),
-  {noreply, State}.
+  {reply, unhandled, State}.
 
 % Module:handle_cast(Request, State) -> Result
 % Only async messages are actually data ones.

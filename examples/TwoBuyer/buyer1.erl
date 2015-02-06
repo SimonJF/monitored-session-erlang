@@ -14,7 +14,7 @@
 ssactor_init(_Args, Monitor) ->
   % Start the conversation
   io:format("Starting conversation in buyer1.~n", []),
-  conversation:start_conversation(self(), "TwoBuyers"), % TODO: self() needs to be monitor PID -- we don't have that
+  conversation:start_conversation(Monitor, "TwoBuyers", "A"),
   conversation:send(Monitor, ["S"], "title", ["String"], ["To Kill a Mockingbird"]),
   no_state. % We don't need no state round these parts
 

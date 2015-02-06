@@ -36,11 +36,20 @@ generate_monitors(RoleSpecList, ProtocolName) ->
 
 % Invite actor instances to partake in a conversation, given the conversation
 % ID and the role mapping.
-invite_actors(ConversationID, State) ->
-  % For each role in turn, attempt to invite an actor.
-  Roles = orddict:fetch_keys(State#protocol_state.role_specs),
-  Res = invite_actors_inner(Roles, ConversationID, State),
-  {reply, Res, State}.
+invite_actors(ConversationID, InitiatorRole, InitiatorPID, State) ->
+  % Firstly, invite the initiator to fulfil the role -- this needs to go through
+  % for the rest to succeed
+  Res = invite_actor_direct(InitiatorRole, InitiatorPID, ConversationID, State),
+  case Res of
+    ok ->
+      % For each role in turn, attempt to invite an actor.
+      Roles = orddict:fetch_keys(State#protocol_state.role_specs),
+      FilteredRoles = lists:filter(fun(Role) -> Role =/= InitiatorRole end,
+                                    Roles),
+      Res2 = invite_actors_inner(FilteredRoles, ConversationID, State),
+      {reply, Res2, State};
+    {error, Err} -> {error, {initiator_unable_to_fulfil, Err}}
+  end.
 
 invite_actors_inner([], _, _) ->
   % We're done!
@@ -68,7 +77,12 @@ invite_actor_role(RoleName, ConversationID, State) ->
       {error, no_registered_actor}
   end.
 
-% OTP Callbacks
+invite_actor_direct(RoleName, ActorMonitorPID, ConversationID, State) ->
+  ProtocolName = protocol_name(State),
+  gen_server:call(ActorMonitorPID, {invitation,
+                                    ProtocolName,
+                                    RoleName,
+                                    ConversationID}).
 
 init([ProtocolName, RoleSpecs, RoleMapping]) ->
   Monitors = generate_monitors(orddict:to_list(RoleSpecs), ProtocolName),
@@ -87,19 +101,20 @@ handle_call({get_monitor, RoleName}, _From, State) ->
   {reply, Reply, State};
 handle_call(get_roles, _From, State) ->
   {reply, State#protocol_state.role_names, State};
-handle_call({begin_invitation, ConversationID}, _From, State) ->
-  invite_actors(ConversationID, State);
+handle_call({begin_invitation, ConversationID, InitiatorRole, InitiatorPID},
+            _From, State) ->
+  invite_actors(ConversationID, InitiatorRole, InitiatorPID, State);
 handle_call(Other, _From, State) ->
   error_logger:warning_msg("WARN: Protocol process ~s received " ++
                            "unhandled synchronous messsage ~p.~n",
                            [protocol_name(State), Other]),
-  {noreply, State}.
+  {reply, ok, State}.
 
 handle_cast(Request, State) ->
   error_logger:warning_msg("WARN: Protocol process ~s received " ++
                            "unhandled asynchronous messsage ~p.~n",
                            [protocol_name(State), Request]),
-  {noreply, State}.
+  {reply, unhandled, State}.
 
 
 handle_info(Request, State) ->

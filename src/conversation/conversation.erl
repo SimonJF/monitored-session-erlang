@@ -31,9 +31,8 @@ initialise(SpecDir, Config) ->
 send(MonitorPID, Recipients, MessageName, Types, Payload)  ->
   gen_server:call(MonitorPID, {send_msg, Recipients, MessageName, Types, Payload}).
 
-% FIXME: This doesn't currently automatically populate the role with the initiator.
-% This means that this won't work unless there's exactly n=1 actors of the initiator's type.
-start_conversation(_MonitorPID, ProtocolName) ->
+% Starts a conversation, assigning the initiator to the given role.
+start_conversation(MonitorPID, ProtocolName, Role) ->
   % Retrieve the role names from the protocol reg server
   % Start a new conversation instance
   error_logger:info_msg("Starting conversation for protocol ~s.~n",
@@ -47,7 +46,7 @@ start_conversation(_MonitorPID, ProtocolName) ->
       ConversationProc = gen_server:start(conversation_instance, [ProtocolName, Roles], []),
       case ConversationProc of
         % And start the invitation system
-        {ok, ConvPID} -> protocol_registry:start_invitation(ProtocolName, ConvPID);
+        {ok, ConvPID} -> protocol_registry:start_invitation(ProtocolName, ConvPID, Role, MonitorPID);
         Err ->
           error_logger:error_msg("Error starting conversation for protocol ~s: ~p~n",
                                  [ProtocolName, Err]),
