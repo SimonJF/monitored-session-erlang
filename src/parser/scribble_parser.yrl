@@ -154,11 +154,11 @@ messagesignature -> left_bracket payload right_bracket:
   scribble_ast:message_signature("", ['$2']).
 messagesignature -> identifier left_bracket right_bracket :
   scribble_ast:message_signature('$1', []).
-messagesignature -> identifier left_bracket payloads right_bracket :
+messagesignature -> identifier left_bracket payload right_bracket :
   scribble_ast:message_signature('$1', '$3').
 
-payloads -> payload : ['$1'].
-payloads -> payload payloads : ['$1'|'$2'].
+%payloads -> payload : ['$1'].
+%payloads -> payload payloads : ['$1'|'$2'].
 
 payload -> payloadelement payloadelementlist : ['$1'|'$2'].
 payloadelementlist -> empty : [].

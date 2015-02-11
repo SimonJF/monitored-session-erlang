@@ -33,10 +33,10 @@ route_message(Msg, State) ->
   Recipients = message:message_recipients(Msg),
   RoleMap = State#conv_inst_state.role_mapping,
   % Lookup the endpoint for each recipient and deliver
-  lists:iter(fun (Recipient) ->
+  lists:foreach(fun (Recipient) ->
                  case orddict:find(Recipient, RoleMap) of
                   {ok, Endpoint} ->
-                    gen_server:cast(Endpoint, {message, Msg});
+                    gen_server:cast(Endpoint, {message, self(), Msg});
                   error ->
                     conversation_warn("Couldn't find endpoint for role ~s.",
                                       [Recipient], State)
@@ -67,7 +67,7 @@ fresh_state(ProtocolName, RoleNames) ->
 % Callbacks...
 init([ProtocolName, RoleNames]) -> {ok, fresh_state(ProtocolName, RoleNames)}.
 
-handle_call({accept_invitation, RoleName}, Sender, State) ->
+handle_call({accept_invitation, RoleName}, {Sender, _}, State) ->
   register_participant(RoleName, Sender, State);
 handle_call(Other, Sender, State) ->
   conversation_warn("Unhandled sync message ~w from ~p", [Other, Sender], State),

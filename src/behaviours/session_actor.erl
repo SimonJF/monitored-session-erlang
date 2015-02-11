@@ -4,7 +4,6 @@
 -compile(export_all).
 -record(actor_state, {actor_type_name,
                       monitor_pid,
-                      actor_module,
                       user_state}).
 
 % This is the behaviour for basic session actors.
@@ -39,7 +38,7 @@ behaviour_info(_Other) ->
     undefined.
 
 log_msg(Func, Format, Args, State) ->
-  InfoStr = "SSACTOR: Actor ~s, actor PID ~p, monitor PID ~p.",
+  InfoStr = "SSACTOR: Actor ~p, actor PID ~p, monitor PID ~p.",
   InfoArgs = [State#actor_state.actor_type_name,
               self(),
               State#actor_state.monitor_pid],
@@ -66,9 +65,9 @@ init([Module, UserArgs]) ->
     {ok, MonitorPid} ->
       actor_type_registry:register_actor_instance(Module, MonitorPid),
       UserState = Module:ssactor_init(UserArgs, MonitorPid),
-      {ok, #actor_state{monitor_pid=MonitorPid,
-                        user_state=UserState,
-                        actor_module=Module}};
+      {ok, #actor_state{actor_type_name=Module,
+                        monitor_pid=MonitorPid,
+                        user_state=UserState}};
     Other ->
       {error, monitor_start_failed, Other}
   end.
@@ -82,14 +81,16 @@ handle_call(Request, _From, State) ->
 
 % Handle incoming user messages. These have been checked by the monitor to
 % ensure that they conform to the MPST.
-handle_cast(Msg = {message, _, Sender, Op, Types, Payload}, State) ->
-  actor_info("Processing message ~w", [Msg], State),
-  Module = State#actor_state.actor_module,
+handle_cast(Msg = {message, _, Sender, _, Op, Types, Payload}, State) ->
+  actor_info("Processing message ~p", [Msg], State),
+  Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
   % TODO: ssactor_handle_message currently just returns a new state.
   % Should we have some more complex callback here instead?
-  NewState = Module:ssactor_handle_message(Sender, Op, Types, Payload, UserState, self()),
-  {noreply, NewState};
+  NewUserState = Module:ssactor_handle_message(Sender, Op, Types, Payload,
+                                           UserState,
+                                           State#actor_state.monitor_pid),
+  {noreply, State#actor_state{user_state=NewUserState}};
 handle_cast(Msg, State) ->
   actor_warn("Received unhandled asynchronous message ~p", [Msg], State),
   {noreply, State}.

@@ -3,7 +3,7 @@
 
 
 log_msg(ActorName, Func, Format, Args) ->
-  Func("Actor ~p: " ++ Format, [ActorName] ++ Args).
+  Func("Actor ~p: " ++ Format ++ "~n", [ActorName] ++ Args).
 
 info(ActorName, Format, Args) ->
   log_msg(ActorName, fun error_logger:info_msg/2, Format, Args).

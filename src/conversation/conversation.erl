@@ -42,7 +42,6 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
   case RoleRes of
     {ok, Roles} ->
       % Next, need to start a new conversation process
-      io:format("Starting new conversation process for protocol ~s.~n", [ProtocolName]),
       ConversationProc = gen_server:start(conversation_instance, [ProtocolName, Roles], []),
       case ConversationProc of
         % And start the invitation system

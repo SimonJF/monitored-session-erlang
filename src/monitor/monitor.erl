@@ -181,7 +181,6 @@ can_receive_at(_Message, _MonitorNode, _MonitorInstance) ->
 
 
 can_send_at(Message, MonitorNode = {send_node, _Id, Info}, _MonitorInstance) ->
-  io:format("can_send_at called, node: ~p~n", [MonitorNode]),
   {Recipients, MessageName, PayloadTypes} = Info,
   CorrectRecipients = lists:sort(Recipients) == lists:sort(message:message_recipients(Message)),
   CorrectMessageName = message:message_name(Message) == MessageName,
@@ -193,7 +192,6 @@ can_send_at(Message, MonitorNode = {send_node, _Id, Info}, _MonitorInstance) ->
     {_, _, false} -> {false, bad_payload_types}
   end;
 can_send_at(_Message, MonitorNode, _MonitorInstance) ->
-  io:format("can_send_at called, node: ~p~n", [MonitorNode]),
   {false, bad_node_type}.
 
 

@@ -68,15 +68,11 @@ load_monitors([], MonitorDict, _) ->
 load_monitors([{ProtocolName, RoleName}|XS], MonitorDict, State) ->
   MonitorRes = protocol_registry:get_monitor(ProtocolName, RoleName),
   case MonitorRes of
-    {ok, Monitor} -> NewDict = orddict:store(ProtocolName, Monitor, MonitorDict),
-                     load_monitors(XS, NewDict, State);
-    {error, bad_protocol_name} ->
-      monitor_warn("Could not load monitor for protocol ~s: bad protocol name.",
-                   [ProtocolName], State),
-      load_monitors(XS, MonitorDict, State);
-    {error, bad_role_name} ->
-      monitor_warn("Could not load monitor for protocol ~s: bad role name (~s).",
-                   [ProtocolName, RoleName], State),
+    {ok, {ok, Monitor}} -> NewDict = orddict:store(ProtocolName, Monitor, MonitorDict),
+                      load_monitors(XS, NewDict, State);
+    Err ->
+      monitor_warn("Could not load monitor for protocol ~s, role ~s: ~p ",
+                   [ProtocolName, RoleName, Err], State),
       load_monitors(XS, MonitorDict, State)
   end.
 
@@ -85,7 +81,6 @@ init([ActorPid, ActorTypeName, ProtocolRoleMap]) ->
   % Firstly, create a fresh state with all of the information we've been given
   State = fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap),
   % Next, we load the monitors.
-  io:format("ProtocolRoleMap: ~p~n", [ProtocolRoleMap]),
   MonitorDict = load_monitors(orddict:to_list(ProtocolRoleMap),
                               orddict:new(),
                               State),
@@ -114,7 +109,14 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
       % TODO: Try-Catch round this, in case the conversation goes away
       Res = gen_server:call(ConversationID, {accept_invitation, RoleName}),
       case Res of
-        ok -> {ok, State#conv_state{active_protocols=NewActiveProtocols}};
+        % Also set the role as active.
+        % FIXME: possible race condition if initiator:
+        % * Already in a conversation
+        % * Initiates another conversation in a different protocol, setting current protocol (instance)
+        % * Receives a message (monitor), setting current protocol again
+        % -- protocol mismatch when sending first message --
+        ok -> {ok, State#conv_state{active_protocols=NewActiveProtocols,
+                                    current_protocol=ProtocolName}};
         {error, Err} -> {error, Err}
       end;
     _Other -> {error, cannot_fulfil}
@@ -159,16 +161,13 @@ deliver_outgoing_message(Msg, ConversationID) ->
 
 % Handles an incoming message. Checks whether we're in the correct conversation,
 % then grabs the monitor, then checks / updates the monitor state.
-handle_incoming_message({message, MessageData}, ConversationID, State) ->
+handle_incoming_message(MessageData, ConversationID, State) ->
   monitor_info("Handling incoming message ~p", [MessageData], State),
-  Res = monitor_msg(send, MessageData, ConversationID, State),
+  Res = monitor_msg(recv, MessageData, ConversationID, State),
   case Res of
     {ok, NewState} -> {noreply, NewState};
     _Err -> {noreply, State} % assuming the error has been logged already
-  end;
-handle_incoming_message(Other, _CID, State) ->
-  monitor_warn("handle_incoming_message called for non_message ~p", [Other], State),
-  {noreply, State}.
+  end.
 
 % FIXME: At the moment, the current protocol will be undefined if the actor hasn't received
 % a message yet. This is a bit problematic for the conversation initiator!
@@ -212,7 +211,7 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
   ActiveProtocols = State#conv_state.active_protocols,
   ProtocolRoleMap = State#conv_state.protocol_role_map,
   % TODO: Set CurrentProtocol if it is undefined
-  ConversationProtocolResult = bidirectional_map:fetch_right(ConversationID, ActiveProtocols),
+  ConversationProtocolResult = bidirectional_map:find_right(ConversationID, ActiveProtocols),
   MonitorFunction = case CommType of
                       send -> fun monitor:send/2;
                       recv -> fun monitor:recv/2
@@ -224,13 +223,13 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
       NewState = State#conv_state{current_protocol=ProtocolName},
       CurrentRole = orddict:fetch(ProtocolName, ProtocolRoleMap),
       % Find the monitor instance for the current role
-      MonitorInstance = orddict:find(CurrentRole, Monitors),
+      MonitorInstance = orddict:find(ProtocolName, Monitors),
       case MonitorInstance of
         {ok, Monitor} ->
           MonitorResult = MonitorFunction(MessageData, Monitor),
           case MonitorResult of
             {ok, NewMonitorInstance} ->
-              NewMonitors = orddict:store(CurrentRole, NewMonitorInstance, Monitors),
+              NewMonitors = orddict:store(ProtocolName, NewMonitorInstance, Monitors),
               NewState1 = NewState#conv_state{monitors=NewMonitors},
               % Do delegation stuff here
               % If we're sending, then pop it to the conversation instance process
@@ -240,13 +239,14 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
                 recv -> deliver_incoming_message(MessageData, NewState1)
               end,
               {ok, NewState1};
-            {error, Err} ->
+            {error, Err, _Monitor} ->
               monitor_warn("Monitor failed when processing message ~p (~p). Error: ~p~n",
                            [MessageData, CommType, Err], State),
               {error, Err}
           end;
         error ->
-          monitor_warn("Could not find monitor for role ~s.~n", [CurrentRole], State),
+          monitor_warn("Could not find monitor for role ~s. Monitors: ~p.~n", [CurrentRole,
+                                                                              orddict:to_list(Monitors)], State),
           {error, bad_monitor}
       end;
     error ->
@@ -273,7 +273,7 @@ handle_call(Other, Sender, State) ->
 % Module:handle_cast(Request, State) -> Result
 % Only async messages are actually data ones.
 % Delivering these, we'll need a conv ID, I think.
-handle_cast({msg, ConversationID, MessageData}, State) ->
+handle_cast({message, ConversationID, MessageData}, State) ->
   handle_incoming_message(MessageData, ConversationID, State);
 handle_cast(Other, State) ->
   monitor_warn("Received unhandled async message ~p.", [Other], State),
