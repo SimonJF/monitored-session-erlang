@@ -123,6 +123,8 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
   end.
 
 
+become(MessageName, Types, Payload) ->
+
 % Handles an invitation to fulfil a role
 handle_invitation(ProtocolName, RoleName, ConversationID, State) ->
   AddRoleResult = add_role(ProtocolName, RoleName, ConversationID, State),
@@ -229,7 +231,9 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
           MonitorResult = MonitorFunction(MessageData, Monitor),
           case MonitorResult of
             {ok, NewMonitorInstance} ->
-              NewMonitors = orddict:store(ProtocolName, NewMonitorInstance, Monitors),
+              NewMonitors = orddict:store(ProtocolName,
+                                          NewMonitorInstance,
+                                          Monitors),
               NewState1 = NewState#conv_state{monitors=NewMonitors},
               % Do delegation stuff here
               % If we're sending, then pop it to the conversation instance process
@@ -275,6 +279,8 @@ handle_call(Other, Sender, State) ->
 % Delivering these, we'll need a conv ID, I think.
 handle_cast({message, ConversationID, MessageData}, State) ->
   handle_incoming_message(MessageData, ConversationID, State);
+handle_cast({become_role, RoleName}, State) ->
+  {noreply, become_role(RoleName, State)};
 handle_cast(Other, State) ->
   monitor_warn("Received unhandled async message ~p.", [Other], State),
   {noreply, State}.

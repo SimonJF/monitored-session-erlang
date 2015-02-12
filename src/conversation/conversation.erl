@@ -31,6 +31,12 @@ initialise(SpecDir, Config) ->
 send(MonitorPID, Recipients, MessageName, Types, Payload)  ->
   gen_server:call(MonitorPID, {send_msg, Recipients, MessageName, Types, Payload}).
 
+% Specialised version of send, which sends the message directly to the monitor
+become(MonitorPID, RoleName, MessageName, Types, Payload) ->
+  gen_server:call(MonitorPID, {become, RoleName, MessageName, Types, Payload}).
+
+
+
 % Starts a conversation, assigning the initiator to the given role.
 start_conversation(MonitorPID, ProtocolName, Role) ->
   % Retrieve the role names from the protocol reg server
@@ -56,3 +62,4 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
                              [ProtocolName, Err]),
       Err
   end.
+
