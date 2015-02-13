@@ -1,0 +1,20 @@
+module src.com.simonjf.scribbletest.Purchase;
+
+type <erlang> "string" from "" as String;
+type <erlang> "integer" from "" as Integer;
+
+global protocol Purchase(role Buyer, role Seller, role Authenticator) {
+	
+	login(String) from Buyer to Seller; // Username
+	login(String) from Seller to Authenticator; // Relay username
+	authenticate(String) from Authenticator to Buyer, Seller; // Token
+	choice at Buyer {
+		request(String) from Buyer to Seller;
+		quote(Integer) from Seller to Buyer;
+	} or {
+		buy(String) from Buyer to Seller; // product
+		delivery(String) from Seller to Buyer;
+	} or {
+		quit() from Buyer to Seller;
+	}
+}

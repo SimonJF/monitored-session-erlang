@@ -159,6 +159,7 @@ deliver_incoming_message(Msg, State) ->
   gen_server:cast(RecipientPID, Msg).
 
 deliver_outgoing_message(Msg, ConversationID) ->
+  % TODO: Optimise self-messages
   gen_server:cast(ConversationID, {outgoing_msg, Msg}).
 
 % Handles an incoming message. Checks whether we're in the correct conversation,
@@ -171,15 +172,7 @@ handle_incoming_message(MessageData, ConversationID, State) ->
     _Err -> {noreply, State} % assuming the error has been logged already
   end.
 
-% FIXME: At the moment, the current protocol will be undefined if the actor hasn't received
-% a message yet. This is a bit problematic for the conversation initiator!
-% I think the easiest thing to do at least while we're debugging this monstrosity
-% is to just hack in a "set role" thing which must be called after conversation
-% initiation to start off with.
-% Alternatively we could Do It Properly and do the proper session initiation dance
-% where we specify that the actor should fulfil a certain role in the protocol to start.
-% In fact, that would likely be the best course of action. It'd mean a bit of tinkering
-% with the invitation mechanism (but minimal, really). Yeah, I'll do that tomorrow morning.
+
 handle_outgoing_message(Recipients, MessageName, Types, Payload, State) ->
   % Firstly, we need to get the conversation ID, based on the current role
   CurrentProtocol = State#conv_state.current_protocol,
@@ -279,10 +272,8 @@ handle_call(Other, Sender, State) ->
 % Delivering these, we'll need a conv ID, I think.
 handle_cast({message, ConversationID, MessageData}, State) ->
   handle_incoming_message(MessageData, ConversationID, State);
-handle_cast({become_role, RoleName}, State) ->
-  {noreply, become_role(RoleName, State)};
 handle_cast(Other, State) ->
-  monitor_warn("Received unhandled async message ~p.", [Other], State),
+  monitor_warn("Received unhandøled async message ~p.", [Other], State),
   {noreply, State}.
 
 handle_info(Info, State) ->

@@ -33,7 +33,7 @@ send(MonitorPID, Recipients, MessageName, Types, Payload)  ->
 
 % Specialised version of send, which sends the message directly to the monitor
 become(MonitorPID, RoleName, MessageName, Types, Payload) ->
-  gen_server:call(MonitorPID, {become, RoleName, MessageName, Types, Payload}).
+  gen_server:call(MonitorPID, {send_msg, [RoleName], MessageName, Types, Payload}).
 
 
 

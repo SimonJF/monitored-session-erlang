@@ -1,0 +1,18 @@
+module src.com.simonjf.scribbletest.Purchase_Buyer;
+
+type <erlang> "string" from "" as String;
+type <erlang> "integer" from "" as Integer;
+
+local protocol Purchase at Buyer(role Buyer,role Seller,role Authenticator) {
+	login(String) to Seller;
+	authenticate(String) from Authenticator;
+	choice at Buyer {
+		request(String) to Seller;
+		quote(Integer) from Seller;
+	} or {
+		buy(String) to Seller;
+		delivery(String) from Seller;
+	} or {
+		quit() to Seller;
+	}
+}

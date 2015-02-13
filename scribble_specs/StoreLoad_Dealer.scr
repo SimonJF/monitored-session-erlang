@@ -1,0 +1,14 @@
+module src.com.simonjf.scribbletest.StoreLoad_Dealer;
+
+type <erlang> "string" from "" as String;
+type <erlang> "integer" from "" as Integer;
+
+local protocol StoreLoad at Dealer(role Store,role Dealer) {
+	choice at Store {
+		request(String,Integer) from Store;
+		put(String,Integer) to Store;
+	} or {
+		quit() from Store;
+		acc() to Store;
+	}
+}

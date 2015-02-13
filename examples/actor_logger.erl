@@ -1,4 +1,4 @@
--module(tbp_logger).
+-module(actor_logger).
 -export([info/3, warn/3, err/3]).
 
 
