@@ -26,16 +26,13 @@ initialise(SpecDir, Config) ->
   ok.
 
 
-% Internal functions
 
 send(MonitorPID, Recipients, MessageName, Types, Payload)  ->
   gen_server:call(MonitorPID, {send_msg, Recipients, MessageName, Types, Payload}).
 
-% Specialised version of send, which sends the message directly to the monitor
-become(MonitorPID, RoleName, MessageName, Types, Payload) ->
-  gen_server:call(MonitorPID, {send_msg, [RoleName], MessageName, Types, Payload}).
-
-
+% Used to transition to another role.
+become(MonitorPID, RoleName, Operation, Types, Arguments) ->
+  gen_server:call(MonitorPID, {become, RoleName, Operation, Types, Arguments}).
 
 % Starts a conversation, assigning the initiator to the given role.
 start_conversation(MonitorPID, ProtocolName, Role) ->

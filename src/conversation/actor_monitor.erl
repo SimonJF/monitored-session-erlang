@@ -79,12 +79,12 @@ load_monitors([{ProtocolName, RoleName}|XS], MonitorDict, State) ->
 % Initialises the basic monitor state with some default values.
 init([ActorPid, ActorTypeName, ProtocolRoleMap]) ->
   % Firstly, create a fresh state with all of the information we've been given
-  State = fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap),
+  BidirectionalPRM = birdirectional_map:from_orddict(ProtocolRoleMap),
+  State = fresh_state(ActorPid, ActorTypeName, BidirectionalPRM),
   % Next, we load the monitors.
   MonitorDict = load_monitors(orddict:to_list(ProtocolRoleMap),
                               orddict:new(),
                               State),
-
   {ok, State#conv_state{monitors=MonitorDict}}.
 
 
@@ -99,7 +99,7 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
   % Firstly, check to see we're registered for the role
   ProtocolRoleMap = State#conv_state.protocol_role_map,
   ActiveProtocols = State#conv_state.active_protocols,
-  RoleFindRes = orddict:find(ProtocolName, ProtocolRoleMap),
+  RoleFindRes = bidirectional_map:find_left(ProtocolName, ProtocolRoleMap),
   AlreadyFulfilled = bidirectional_map:contains_left(ProtocolName, ActiveProtocols),
   case {RoleFindRes, AlreadyFulfilled} of
     {_, true} -> {error, already_fulfilled};
@@ -157,7 +157,6 @@ deliver_incoming_message(Msg, State) ->
   gen_server:cast(RecipientPID, Msg).
 
 deliver_outgoing_message(Msg, ConversationID) ->
-  % TODO: Optimise self-messages
   gen_server:cast(ConversationID, {outgoing_msg, Msg}).
 
 % Handles an incoming message. Checks whether we're in the correct conversation,
@@ -171,12 +170,50 @@ handle_incoming_message(MessageData, ConversationID, State) ->
   end.
 
 
+%% TODO: Unfinished -- A much better model is to *not* have the current state on
+%% the monitor as this is prone to hella race conditions.
+handle_become(RoleName, Op, Types, Arguments, State) ->
+  % Transition to new role and deliver the message
+  ProtocolRoleMap = State#conv_state.protocol_role_map,
+  ActiveProtocols = State#conv_state.active_protocols,
+  ProtocolRes= bidirectional_map:find_right(RoleName, ProtocolRoleMap),
+  case ProtocolRes of
+    {ok, ProtocolName} ->
+      RecipientPID = State#conv_state.actor_pid,
+      gen_server:cast(RecipientPID, Msg).
+
+      ConversationIDRes = bidirectional_map:find_right(CurrentProtocol, ActiveProtocols),
+      case ConversationIDRes of
+        {ok, ConversationID} ->
+          gen_server:cast(ConversationID, {outgoing_msg, Msg}).
+          
+  case {ConversationIDRes, RoleRes} of
+    {{ok, ConversationID}, {ok, RoleName}} ->
+      MessageData = message:message(make_ref(), RoleName, Recipients,
+                                    MessageName, Types, Payload),
+      MonitorRes = monitor_msg(send, MessageData, ConversationID, State),
+      case MonitorRes of
+        {ok, NewState} -> {reply, ok, NewState};
+        Err -> {reply, Err, State}
+      end;
+    {Err, ok} ->
+      monitor_warn("Couldn't find conversation for active protocol ~s.~n",
+                   [CurrentProtocol], State),
+      {reply, Err, State};
+    {_, Err} ->
+      monitor_warn("Couldn't find current role for active protocol ~s.~n",
+                   [CurrentProtocol], State),
+      {reply, Err, State}
+  end.
+
+
+
 handle_outgoing_message(Recipients, MessageName, Types, Payload, State) ->
   % Firstly, we need to get the conversation ID, based on the current role
   CurrentProtocol = State#conv_state.current_protocol,
   ProtocolRoleMap = State#conv_state.protocol_role_map,
   ActiveProtocols = State#conv_state.active_protocols,
-  RoleRes = orddict:find(CurrentProtocol, ProtocolRoleMap),
+  RoleRes = bidirectional_map:find_left(CurrentProtocol, ProtocolRoleMap),
   ConversationIDRes = bidirectional_map:find_left(CurrentProtocol, ActiveProtocols),
   case {ConversationIDRes, RoleRes} of
     {{ok, ConversationID}, {ok, RoleName}} ->
@@ -203,7 +240,6 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
   % Get the protocol name for the conversation
   ActiveProtocols = State#conv_state.active_protocols,
   ProtocolRoleMap = State#conv_state.protocol_role_map,
-  % TODO: Set CurrentProtocol if it is undefined
   ConversationProtocolResult = bidirectional_map:find_right(ConversationID, ActiveProtocols),
   MonitorFunction = case CommType of
                       send -> fun monitor:send/2;
@@ -214,7 +250,7 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
       % Set the current protocol, so that it can be used when sending
       % messages later on.
       NewState = State#conv_state{current_protocol=ProtocolName},
-      CurrentRole = orddict:fetch(ProtocolName, ProtocolRoleMap),
+      CurrentRole = bidirectional_map:fetch_left(ProtocolName, ProtocolRoleMap),
       % Find the monitor instance for the current role
       MonitorInstance = orddict:find(ProtocolName, Monitors),
       case MonitorInstance of
@@ -260,6 +296,8 @@ handle_call({terminate_conversation, ConversationID}, _Sender, State) ->
   handle_terminate_conversation(ConversationID, State);
 handle_call({send_msg, Recipients, MessageName, Types, Payload}, _Sender, State) ->
   handle_outgoing_message(Recipients, MessageName, Types, Payload, State);
+handle_call({become, RoleName, Op, Types, Arguments}, _Sender, State) ->
+  handle_become(RoleName, Op, Types, Arguments, State);
 handle_call(Other, Sender, State) ->
   monitor_warn("Received unhandled synchronous message ~p from PID ~p.",
                [Other, Sender], State),
