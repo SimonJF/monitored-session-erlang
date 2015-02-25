@@ -4,11 +4,14 @@ type <erlang> "string" from "" as String;
 type <erlang> "integer" from "" as Integer;
 
 local protocol StoreLoad at Store(role Store,role Dealer) {
-	choice at Store {
-		request(String,Integer) to Dealer;
-		put(String,Integer) from Dealer;
-	} or {
-		quit() to Dealer;
-		acc() from Dealer;
+	rec Rec {
+		choice at Store {
+			request(String,Integer) to Dealer;
+			put(String,Integer) from Dealer;
+			continue Rec;
+		} or {
+			quit() to Dealer;
+			acc() from Dealer;
+		}
 	}
 }

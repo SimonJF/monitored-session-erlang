@@ -81,3 +81,67 @@ choice1_test() ->
   {ok, MonitorInstance9} = monitor:send(CheerioOlChapMessage, MonitorInstance8),
   ?assert(monitor:is_ended(MonitorInstance9)).
 
+
+rec1_test1_test() ->
+  Filename = ?SPEC_DIRECTORY ++ "RecTest1_A.scr",
+  ProtocolName = "RecTest1",
+  RoleName = "A",
+  {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
+  ?assertNot(monitor:is_ended(MonitorInstance)),
+  RequestMessage = message:message(0, "A", ["B"], "x", [], []),
+  {ok, MonitorInstance1} = monitor:send(RequestMessage, MonitorInstance),
+  ResponseMessage = message:message(1, "B", ["A"], "y", [], []),
+  {ok, MonitorInstance2} = monitor:recv(ResponseMessage, MonitorInstance1),
+  ?assertNot(monitor:is_ended(MonitorInstance2)),
+  % and request again to test recursion
+  {ok, MonitorInstance3} = monitor:send(RequestMessage, MonitorInstance2),
+  ?assertNot(monitor:is_ended(MonitorInstance3)).
+
+rec1_test2_test() ->
+  Filename = ?SPEC_DIRECTORY ++ "RecTest1_B.scr",
+  ProtocolName = "RecTest1",
+  RoleName = "B",
+  {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
+  ?assertNot(monitor:is_ended(MonitorInstance)),
+  RequestMessage = message:message(0, "A", ["B"], "x", [], []),
+  {ok, MonitorInstance1} = monitor:recv(RequestMessage, MonitorInstance),
+  ResponseMessage = message:message(1, "B", ["A"], "y", [], []),
+  {ok, MonitorInstance2} = monitor:send(ResponseMessage, MonitorInstance1),
+  ?assertNot(monitor:is_ended(MonitorInstance2)),
+  % and request again to test recursion
+  {ok, MonitorInstance3} = monitor:recv(RequestMessage, MonitorInstance2),
+  ?assertNot(monitor:is_ended(MonitorInstance3)).
+
+
+rec2_test1_test() ->
+  Filename = ?SPEC_DIRECTORY ++ "RecTest2_A.scr",
+  ProtocolName = "RecTest2",
+  RoleName = "A",
+  {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
+  ?assertNot(monitor:is_ended(MonitorInstance)),
+  StartMessage = message:message(0, "A", ["B"], "x", [], []),
+  {ok, MonitorInstance1} = monitor:send(StartMessage, MonitorInstance),
+  ChooseR2Message = message:message(1, "A", ["B"], "goToR2", [], []),
+  {ok, MonitorInstance2} = monitor:send(ChooseR2Message, MonitorInstance1),
+  ?assertNot(monitor:is_ended(MonitorInstance2)),
+  ChooseR1Message = message:message(2, "A", ["B"], "quit", [], []),
+  {ok, MonitorInstance3} = monitor:send(ChooseR1Message, MonitorInstance2),
+  ?assert(monitor:is_ended(MonitorInstance3)).
+
+
+rec2_test2_test() ->
+  Filename = ?SPEC_DIRECTORY ++ "RecTest2_A.scr",
+  ProtocolName = "RecTest2",
+  RoleName = "A",
+  {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
+  ?assertNot(monitor:is_ended(MonitorInstance)),
+  StartMessage = message:message(0, "A", ["B"], "x", [], []),
+  {ok, MonitorInstance1} = monitor:send(StartMessage, MonitorInstance),
+  ChooseR1Message = message:message(1, "A", ["B"], "goToR1", [], []),
+  {ok, MonitorInstance2} = monitor:send(ChooseR1Message, MonitorInstance1),
+  ?assertNot(monitor:is_ended(MonitorInstance2)),
+  % and request again to test scope escape
+  {ok, MonitorInstance3} = monitor:send(StartMessage, MonitorInstance2),
+  ?assertNot(monitor:is_ended(MonitorInstance3)).
+
+

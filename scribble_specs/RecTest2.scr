@@ -1,0 +1,18 @@
+module src.com.simonjf.scribbletest.RecTest2;
+
+global protocol RecTest2(role A, role B) {
+	rec r1 {
+		x() from A to B;
+		rec r2 {
+			choice at A {
+				goToR1() from A to B;
+				continue r1; 
+			} or {
+				goToR2() from A to B;
+				continue r2;
+			} or {
+				quit() from A to B;
+			}
+		}
+	}
+}

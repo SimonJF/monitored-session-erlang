@@ -1,0 +1,18 @@
+module src.com.simonjf.scribbletest.RecTest2_A;
+
+local protocol RecTest2 at A(role A,role B) {
+	rec r1 {
+		x() to B;
+		rec r2 {
+			choice at A {
+				goToR1() to B;
+				continue r1;
+			} or {
+				goToR2() to B;
+				continue r2;
+			} or {
+				quit() to B;
+			}
+		}
+	}
+}

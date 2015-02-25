@@ -123,8 +123,6 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
   end.
 
 
-become(MessageName, Types, Payload) ->
-
 % Handles an invitation to fulfil a role
 handle_invitation(ProtocolName, RoleName, ConversationID, State) ->
   AddRoleResult = add_role(ProtocolName, RoleName, ConversationID, State),

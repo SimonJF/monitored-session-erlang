@@ -28,14 +28,17 @@ send_node(Id, {local_send, MessageSig, Recipients}) ->
 choice_node(Id, _Choice) ->
   make_node(choice_node, Id, {}).
 
+rec_node(Id, {rec, MuName, _}) ->
+  make_node(rec_node, Id, {MuName}).
+
 end_node(Id) -> make_node(end_node, Id, {}).
 
 
 % Scopes!
 % Each scope is a set of interactions, and there might be sub-scopes too.
 % Importantly, the end of a scope has a pre-defined end index.
-scope(Name, Instructions, EndIndex) ->
-  {scope, Name, Instructions, EndIndex}.
+scope(Name, Instructions, EndIndex, MuMap) ->
+  {scope, Name, Instructions, EndIndex, MuMap}.
 
 
 % Calculates the size of a block of instructions (so we can do calculations
@@ -48,7 +51,7 @@ instruction_size({local_send, _, _}) -> 1;
 instruction_size({local_receive, _, _}) -> 1;
 instruction_size({choice, _, Choices}) ->
   1 + lists:foldl(fun(ChoiceBlock, Sum) -> Sum + block_size(ChoiceBlock) end, 0, Choices);
-instruction_size({recursion, _, Block}) -> block_size(Block);
+instruction_size({rec, _, Block}) -> 1 + block_size(Block);
 instruction_size({par, _ParallelBlocks}) -> 0; %FIXME: uhhhhh -- need to look up nested FSM stuff. God, writing this is going to take forever
 instruction_size({local_interruptible, _, InterruptibleBlock, _}) -> % FIXME: No idea how to do this one either
   block_size(InterruptibleBlock);
@@ -63,10 +66,11 @@ instruction_size({continue, _}) -> 0.
 node_type({local_send, _, _}) -> simple_transition;
 node_type({local_receive, _, _}) -> simple_transition;
 node_type({choice, _, _}) -> new_scope;
-node_type({recursion, _}) -> new_scope;
+node_type({rec, _, _}) -> new_scope;
 node_type({parallel, _}) -> new_scope;
 node_type({local_interruptible, _, _, _}) -> new_scope;
 node_type({local_interruptible_throw, _, _, _, _}) -> new_scope;
+node_type({continue, _}) -> tau_transition;
 node_type(_Other) -> io:format("Other: ~p~n", [_Other]),
                      other.
 
@@ -140,7 +144,7 @@ generate_monitor_for({module, _Name, _Imports, _Payloads, Protocols},
 % Generates a monitor from a local protocol. Only works with a local protocol definition!
 generate_monitor({local_protocol, ProtocolName, ProjRoleName, _Params, _Roles, Block}) ->
   Size = block_size(Block),
-  RootScope = scope(ProtocolName ++ "@" ++ ProjRoleName, Block, Size),
+  RootScope = scope(ProtocolName ++ "@" ++ ProjRoleName, Block, Size, orddict:new()),
   EvalRes = evaluate_scope(RootScope, 0, orddict:new(), orddict:new()),
   case EvalRes of
     {EndID, States1, Transitions1} ->
@@ -149,12 +153,26 @@ generate_monitor({local_protocol, ProtocolName, ProjRoleName, _Params, _Roles, B
   end;
 generate_monitor(_Other) -> undefined.
 
-calculate_next_index([], RunningID, _EndIndex) ->
+calculate_next_index([], RunningID, _EndIndex, _MuMap) ->
   RunningID;
-calculate_next_index([_X], _RunningID, EndIndex) ->
-  EndIndex;
-calculate_next_index([_X|_XS], RunningID, _EndIndex) ->
-  RunningID + 1.
+calculate_next_index([X], _RunningID, EndIndex, MuMap) ->
+  case X of
+    {continue, MuName} ->
+      case orddict:find(MuName, MuMap) of
+        {ok, RecID} -> RecID;
+        error -> {error, monitor_gen, undefined_recursion_id, MuName}
+      end;
+    _Other -> EndIndex
+  end;
+calculate_next_index([_X|[Y|_XS]], RunningID, _EndIndex, MuMap) ->
+  case Y of
+    {continue, MuName} ->
+      case orddict:find(MuName, MuMap) of
+        {ok, RecID} -> RecID;
+        error -> {error, monitor_gen, undefined_recursion_id, MuName}
+      end;
+    _Other -> RunningID + 1
+  end.
 
 add_transition(From, To, TransitionTable) ->
       orddict:update(From, fun(OldTransitions) ->
@@ -162,7 +180,7 @@ add_transition(From, To, TransitionTable) ->
                               sets:from_list([To]), TransitionTable).
 
 % Scope -> RunningID -> States -> Transitions -> {ID, States, Transitions}
-evaluate_scope({scope, _Name, Instructions, EndIndex}, RunningID, States, Transitions) ->
+evaluate_scope({scope, _Name, Instructions, EndIndex, MuMap}, RunningID, States, Transitions) ->
   % Okay, so we're in the scope, have a running ID, state table and transition table.
   % We need to generate nodes for each of the instructions.
   % If the instruction is a send or receive, then it should have a transition to the
@@ -170,21 +188,21 @@ evaluate_scope({scope, _Name, Instructions, EndIndex}, RunningID, States, Transi
   % If the instruction is a choice, it should have transitions to the first instruction
   % of each sub-scope.
   % The final instruction should have a transition to the EndIndex.
-  evaluate_scope_inner(Instructions, EndIndex, RunningID, States, Transitions).
+  evaluate_scope_inner(Instructions, EndIndex, RunningID, States, Transitions, MuMap).
 
 
-evaluate_scope_inner([], _EI, RunningID, States, Transitions) ->
+evaluate_scope_inner([], _EI, RunningID, States, Transitions, _MuMap) ->
   {RunningID, States, Transitions};
-evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, RunningID, States, Transitions) ->
+evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, RunningID, States, Transitions, MuMap) ->
   case node_type(X) of
     simple_transition ->
       % Node with simple +1 transition, and a node to transition to
       % Simple stuff, just need to generate a node and link to the ID + 1.
       % This is safe because we know the list has more than one entry :)
       {RID, NewStates, Ts} = generate_node(X, RunningID, States, Transitions),
-      NextIndex = calculate_next_index(ScopeBlock, RunningID, EndIndex),
+      NextIndex = calculate_next_index(ScopeBlock, RunningID, EndIndex, MuMap),
       NewTransitions = add_transition(RunningID, NextIndex, Ts),
-      evaluate_scope_inner(XS, EndIndex, RID, NewStates, NewTransitions);
+      evaluate_scope_inner(XS, EndIndex, RID, NewStates, NewTransitions, MuMap);
      new_scope ->
       % Create a new scope, set the end index to our end index.
       case X of
@@ -196,7 +214,7 @@ evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, RunningID, States, Transitio
           {RID1, States1, Transitions1} = generate_node(X, RunningID, States, Transitions),
           % Now, generate the remainder of the scope, with the calculated end index.
           {RID2, States2, Transitions2} = lists:foldl(fun (Block, {RID, RStates, RTransitions}) ->
-                           Scope = scope("", Block, ScopeEndIndex),
+                           Scope = scope("", Block, ScopeEndIndex, MuMap),
                            BlockSize = block_size(Block),
                            RTransitions1 = if BlockSize > 0 ->
                                                 add_transition(ChoiceNodeID, RID, RTransitions);
@@ -205,11 +223,26 @@ evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, RunningID, States, Transitio
                                            end,
                            evaluate_scope(Scope, RID, RStates, RTransitions1) end,
                       {RID1, States1, Transitions1}, ChoiceBlocks),
-          evaluate_scope_inner(XS, EndIndex, RID2, States2, Transitions2);
+          evaluate_scope_inner(XS, EndIndex, RID2, States2, Transitions2, MuMap);
           % TODO: Recursion, Choice, Parallel, Interruptible
+        {rec, MuName, Interactions} ->
+          ScopeEndIndex = RunningID + instruction_size(X),
+          RecNodeID = RunningID,
+          {RID1, States1, Transitions1} = generate_node(X, RunningID, States, Transitions),
+          BlockSize = block_size(Interactions),
+          Transitions2 = if BlockSize > 0 ->
+                              add_transition(RecNodeID, RecNodeID + 1, Transitions1);
+                            BlockSize == 0 -> Transitions
+                         end,
+          NewMuMap = orddict:store(MuName, RecNodeID, MuMap),
+          RecScope = scope("rec", Interactions, ScopeEndIndex, NewMuMap),
+          {RID2, States2, Transitions3} = evaluate_scope(RecScope, RID1, States1, Transitions2),
+          evaluate_scope_inner(XS, ScopeEndIndex, RID2, States2, Transitions3, MuMap);
         Other -> {error, monitor_gen, unsupported_node, Other}
       end;
-     Other -> {error, monitor_gen, unsupported_node, Other}
+     % Continue is taken care of in calculate_next_index
+     tau_transition -> evaluate_scope_inner(XS, EndIndex, RunningID, States, Transitions, MuMap);
+     Other -> {error, monitor_gen, unsupported_node_type, Other}
   end.
 
 
@@ -229,7 +262,10 @@ generate_node(LocalSend = {local_send, _, _}, RunningID, States, Transitions) ->
   add_node(RunningID, SendNode, States, Transitions);
 generate_node(Choice = {choice, _, _}, RunningID, States, Transitions) ->
   ChoiceNode = choice_node(RunningID, Choice),
-  add_node(RunningID, ChoiceNode, States, Transitions).
+  add_node(RunningID, ChoiceNode, States, Transitions);
+generate_node(Rec = {rec, _, _}, RunningID, States, Transitions) ->
+  RecNode = rec_node(RunningID, Rec),
+  add_node(RunningID, RecNode, States, Transitions).
 
 % Debug all the things
 % hax to the max

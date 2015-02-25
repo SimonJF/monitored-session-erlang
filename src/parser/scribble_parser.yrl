@@ -355,7 +355,7 @@ localrecursion -> rec_kw identifier localprotocolblock :
   scribble_ast:recursion('$2', '$3').
 
 localcontinue -> continue_kw identifier semicolon :
-  scribble_ast:continue('$1').
+  scribble_ast:continue('$2').
 
 localparallel -> par_kw localprotocolblock localparallelinner :
   scribble_ast:parallel(['$2'|'$3']).

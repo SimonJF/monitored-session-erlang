@@ -1,0 +1,9 @@
+module src.com.simonjf.scribbletest.RecTest1_A;
+
+local protocol RecTest1 at A(role A,role B) {
+	rec z {
+		x() to B;
+		y() from B;
+		continue z;
+	}
+}

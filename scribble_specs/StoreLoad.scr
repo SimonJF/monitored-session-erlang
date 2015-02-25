@@ -4,13 +4,15 @@ type <erlang> "string" from "" as String;
 type <erlang> "integer" from "" as Integer;
 
 global protocol StoreLoad(role Store, role Dealer) {
-	// rec Rec { TODO: I really need to implement this!!!
-	choice at Store {
-		request(String, Integer) from Store to Dealer; // Product, Number
-		put(String, Integer) from Dealer to Store; // Product, Number
-		// continue Rec;
-	} or {
-		quit() from Store to Dealer;
-		acc() from Dealer to Store;
+	rec Rec {
+		choice at Store {
+			request(String, Integer) from Store to Dealer; // Product, Number
+			put(String, Integer) from Dealer to Store; // Product, Number
+			continue Rec;
+		} or {
+			quit() from Store to Dealer;
+			acc() from Dealer to Store;
+		}
+		
 	}
 }
