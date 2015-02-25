@@ -101,7 +101,14 @@ transition_next_node(_Message, MonitorNode, PredicateResult, MonitorInstance) ->
 filter_outgoing_transitions(InteractionType, NodeType, Message, MonitorNode, PredicateFunction, MonitorInstance) ->
   % Check whether each possible outgoing transition is actually one we could take
   lists:filtermap(fun(Node) ->
-      if element(1, (Node)) == NodeType ->
+      NodeTy = element(1, Node),
+      if (NodeTy == rec_node) or (NodeTy == choice_node) ->
+           NNRes = next_node(InteractionType, Message, Node, MonitorInstance),
+           case NNRes of
+             {ok, NN} -> {true, NN};
+             _Other -> false
+           end;
+         NodeTy == NodeType ->
            case PredicateFunction(Message, Node, MonitorInstance) of
              true ->
                NNRes = next_node(InteractionType, Message, Node, MonitorInstance),
@@ -166,20 +173,7 @@ can_receive_at(Message, {receive_node, _Id, Info}, _MonitorInstance) ->
     {_, false, _} -> {false, bad_message_name};
     {_, _, false} -> {false, bad_payload_types}
   end;
-can_receive_at(Message, MonitorNode = {NodeTy, _Id, _Info}, MonitorInstance) when
-    ((NodeTy == choice_node) or (NodeTy == rec_node)) ->
-  % Righto. At this point, we need to check all of the outgoing transitions to
-  % see whether they have an appropriate receive output node.
-  % If so, we take the transition out of that.
-  OutgoingTransitions = filter_outgoing_transitions(recv,
-                                                    receive_node,
-                                                    Message,
-                                                    MonitorNode,
-                                                    fun monitor_gen:can_receive_at/3,
-                                                    MonitorInstance),
-  check_transition_list(OutgoingTransitions);
 can_receive_at(_Message, _MonitorNode, _MonitorInstance) ->
-
   {false, bad_node_type}.
 
 
@@ -194,18 +188,6 @@ can_send_at(Message, {send_node, _Id, Info}, _MonitorInstance) ->
     {_, false, _} -> {false, bad_message_name};
     {_, _, false} -> {false, bad_payload_types}
   end;
-can_send_at(Message, MonitorNode = {NodeTy, _Id, _Info}, MonitorInstance) when
-    ((NodeTy == choice_node) or (NodeTy == rec_node)) ->
-  % Righto. At this point, we need to check all of the outgoing transitions to
-  % see whether they have an appropriate receive output node.
-  % If so, we take the transition out of that.
-  OutgoingTransitions = filter_outgoing_transitions(send,
-                                                    send_node,
-                                                    Message,
-                                                    MonitorNode,
-                                                    fun monitor_gen:can_send_at/3,
-                                                    MonitorInstance),
-  check_transition_list(OutgoingTransitions);
 can_send_at(_Message, _MonitorNode, _MonitorInstance) ->
   {false, bad_node_type}.
 
