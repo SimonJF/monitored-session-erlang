@@ -64,6 +64,7 @@ init([Module, UserArgs]) ->
   case MonitorProcess of
     {ok, MonitorPid} ->
       actor_type_registry:register_actor_instance(Module, MonitorPid),
+      % TODO: Must send the protocol and role here too
       UserState = Module:ssactor_init(UserArgs, MonitorPid),
       {ok, #actor_state{actor_type_name=Module,
                         monitor_pid=MonitorPid,
@@ -81,7 +82,7 @@ handle_call(Request, _From, State) ->
 
 % Handle incoming user messages. These have been checked by the monitor to
 % ensure that they conform to the MPST.
-handle_cast(Msg = {message, _, Sender, _, Op, Types, Payload}, State) ->
+handle_cast(Msg = {Protocol, Role, {message, _, Sender, _, Op, Types, Payload}}, State) ->
   actor_info("Processing message ~p", [Msg], State),
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
@@ -89,7 +90,7 @@ handle_cast(Msg = {message, _, Sender, _, Op, Types, Payload}, State) ->
   % Should we have some more complex callback here instead?
   NewUserState = Module:ssactor_handle_message(Sender, Op, Types, Payload,
                                            UserState,
-                                           State#actor_state.monitor_pid),
+                                           {State#actor_state.monitor_pid, Protocol, Role}),
   {noreply, State#actor_state{user_state=NewUserState}};
 handle_cast(Msg, State) ->
   actor_warn("Received unhandled asynchronous message ~p", [Msg], State),

@@ -7,8 +7,7 @@
                      actor_type_name, % Name of the attached actor type
                      active_protocols, % Protocols which we're currently involved in
                      protocol_role_map, % Roles for each protocol
-                     monitors, % Monitors for each role we play in each protocol
-                     current_protocol}). % The currently-active protocol.
+                     monitors}). % Monitors for each role we play in each protocol
 
 % Monitor State
 % Actor PID (as before)
@@ -60,8 +59,7 @@ fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap) ->
               actor_type_name=ActorTypeName, % Name of the attached actor type
               active_protocols=bidirectional_map:new(), % Protocols which we're currently involved in
               protocol_role_map=ProtocolRoleMap, % Roles for each protocol
-              monitors=orddict:new(), % Monitors for each role we play in each protocol
-              current_protocol=undefined}. % The currently-active protocol.
+              monitors=orddict:new()}. % Monitors for each role we play in each protocol
 
 load_monitors([], MonitorDict, _) ->
   MonitorDict;
@@ -79,7 +77,7 @@ load_monitors([{ProtocolName, RoleName}|XS], MonitorDict, State) ->
 % Initialises the basic monitor state with some default values.
 init([ActorPid, ActorTypeName, ProtocolRoleMap]) ->
   % Firstly, create a fresh state with all of the information we've been given
-  BidirectionalPRM = birdirectional_map:from_orddict(ProtocolRoleMap),
+  BidirectionalPRM = bidirectional_map:from_orddict(ProtocolRoleMap),
   State = fresh_state(ActorPid, ActorTypeName, BidirectionalPRM),
   % Next, we load the monitors.
   MonitorDict = load_monitors(orddict:to_list(ProtocolRoleMap),
@@ -110,13 +108,7 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
       Res = gen_server:call(ConversationID, {accept_invitation, RoleName}),
       case Res of
         % Also set the role as active.
-        % FIXME: possible race condition if initiator:
-        % * Already in a conversation
-        % * Initiates another conversation in a different protocol, setting current protocol (instance)
-        % * Receives a message (monitor), setting current protocol again
-        % -- protocol mismatch when sending first message --
-        ok -> {ok, State#conv_state{active_protocols=NewActiveProtocols,
-                                    current_protocol=ProtocolName}};
+        ok -> {ok, State#conv_state{active_protocols=NewActiveProtocols}};
         {error, Err} -> {error, Err}
       end;
     _Other -> {error, cannot_fulfil}
@@ -152,9 +144,9 @@ handle_terminate_conversation(ConversationID, State) ->
 
 
 % Here, we deliver the message to the attached actor (which is a gen_server).
-deliver_incoming_message(Msg, State) ->
+deliver_incoming_message(Protocol, Role, Msg, State) ->
   RecipientPID = State#conv_state.actor_pid,
-  gen_server:cast(RecipientPID, Msg).
+  gen_server:cast(RecipientPID, {Protocol, Role, Msg}).
 
 deliver_outgoing_message(Msg, ConversationID) ->
   gen_server:cast(ConversationID, {outgoing_msg, Msg}).
@@ -170,47 +162,41 @@ handle_incoming_message(MessageData, ConversationID, State) ->
   end.
 
 
-%% TODO: Unfinished -- A much better model is to *not* have the current state on
-%% the monitor as this is prone to hella race conditions.
-handle_become(RoleName, Op, Types, Arguments, State) ->
-  % Transition to new role and deliver the message
-  ProtocolRoleMap = State#conv_state.protocol_role_map,
-  ActiveProtocols = State#conv_state.active_protocols,
-  ProtocolRes= bidirectional_map:find_right(RoleName, ProtocolRoleMap),
-  case ProtocolRes of
-    {ok, ProtocolName} ->
-      RecipientPID = State#conv_state.actor_pid,
-      gen_server:cast(RecipientPID, Msg).
-
-      ConversationIDRes = bidirectional_map:find_right(CurrentProtocol, ActiveProtocols),
-      case ConversationIDRes of
-        {ok, ConversationID} ->
-          gen_server:cast(ConversationID, {outgoing_msg, Msg}).
-          
-  case {ConversationIDRes, RoleRes} of
-    {{ok, ConversationID}, {ok, RoleName}} ->
-      MessageData = message:message(make_ref(), RoleName, Recipients,
-                                    MessageName, Types, Payload),
-      MonitorRes = monitor_msg(send, MessageData, ConversationID, State),
-      case MonitorRes of
-        {ok, NewState} -> {reply, ok, NewState};
-        Err -> {reply, Err, State}
-      end;
-    {Err, ok} ->
-      monitor_warn("Couldn't find conversation for active protocol ~s.~n",
-                   [CurrentProtocol], State),
-      {reply, Err, State};
-    {_, Err} ->
-      monitor_warn("Couldn't find current role for active protocol ~s.~n",
-                   [CurrentProtocol], State),
-      {reply, Err, State}
-  end.
+% handle_become(RoleName, Op, Types, Arguments, State) ->
+%   % Transition to new role and deliver the message
+%   ProtocolRoleMap = State#conv_state.protocol_role_map,
+%   ActiveProtocols = State#conv_state.active_protocols,
+%   ProtocolRes= bidirectional_map:find_right(RoleName, ProtocolRoleMap),
+%   case ProtocolRes of
+%     {ok, ProtocolName} ->
+%       RecipientPID = State#conv_state.actor_pid,
+%       gen_server:cast(RecipientPID, Msg).
+%
+%       ConversationIDRes = bidirectional_map:find_right(CurrentProtocol, ActiveProtocols),
+%       case ConversationIDRes of
+%         {ok, ConversationID} ->
+%           gen_server:cast(ConversationID, {outgoing_msg, Msg}).
+%
+%   case {ConversationIDRes, RoleRes} of
+%     {{ok, ConversationID}, {ok, RoleName}} ->
+%       MessageData = message:message(make_ref(), RoleName, Recipients,
+%                                     MessageName, Types, Payload),
+%       MonitorRes = monitor_msg(send, MessageData, ConversationID, State),
+%       case MonitorRes of
+%         {ok, NewState} -> {reply, ok, NewState};
+%         Err -> {reply, Err, State}
+%       end;
+%     {_, Err} ->
+%       monitor_warn("Couldn't find current role for active protocol ~s.~n",
+%                    [CurrentProtocol], State),
+%       {reply, Err, State}
+%   end.
 
 
 
-handle_outgoing_message(Recipients, MessageName, Types, Payload, State) ->
+handle_outgoing_message(CurrentProtocol, _CurrentRole, Recipients,
+                        MessageName, Types, Payload, State) ->
   % Firstly, we need to get the conversation ID, based on the current role
-  CurrentProtocol = State#conv_state.current_protocol,
   ProtocolRoleMap = State#conv_state.protocol_role_map,
   ActiveProtocols = State#conv_state.active_protocols,
   RoleRes = bidirectional_map:find_left(CurrentProtocol, ProtocolRoleMap),
@@ -249,7 +235,6 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
     {ok, ProtocolName} ->
       % Set the current protocol, so that it can be used when sending
       % messages later on.
-      NewState = State#conv_state{current_protocol=ProtocolName},
       CurrentRole = bidirectional_map:fetch_left(ProtocolName, ProtocolRoleMap),
       % Find the monitor instance for the current role
       MonitorInstance = orddict:find(ProtocolName, Monitors),
@@ -261,15 +246,15 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
               NewMonitors = orddict:store(ProtocolName,
                                           NewMonitorInstance,
                                           Monitors),
-              NewState1 = NewState#conv_state{monitors=NewMonitors},
+              NewState = State#conv_state{monitors=NewMonitors},
               % Do delegation stuff here
               % If we're sending, then pop it to the conversation instance process
               % If we're receiving, then delegate to user session actor code.
               case CommType of
                 send -> deliver_outgoing_message(MessageData, ConversationID);
-                recv -> deliver_incoming_message(MessageData, NewState1)
+                recv -> deliver_incoming_message(ProtocolName, CurrentRole, MessageData, NewState)
               end,
-              {ok, NewState1};
+              {ok, NewState};
             {error, Err, _Monitor} ->
               monitor_warn("Monitor failed when processing message ~p (~p). Error: ~p~n",
                            [MessageData, CommType, Err], State),
@@ -294,10 +279,12 @@ handle_call({invitation, ProtocolName, RoleName, ConversationID}, _Sender, State
   handle_invitation(ProtocolName, RoleName, ConversationID, State);
 handle_call({terminate_conversation, ConversationID}, _Sender, State) ->
   handle_terminate_conversation(ConversationID, State);
-handle_call({send_msg, Recipients, MessageName, Types, Payload}, _Sender, State) ->
-  handle_outgoing_message(Recipients, MessageName, Types, Payload, State);
-handle_call({become, RoleName, Op, Types, Arguments}, _Sender, State) ->
-  handle_become(RoleName, Op, Types, Arguments, State);
+handle_call({send_msg, CurrentProtocol, CurrentRole, Recipients,
+             MessageName, Types, Payload}, _Sender, State) ->
+  handle_outgoing_message(CurrentProtocol, CurrentRole, Recipients,
+                          MessageName, Types, Payload, State);
+%handle_call({become, RoleName, Op, Types, Arguments}, _Sender, State) ->
+%  handle_become(RoleName, Op, Types, Arguments, State);
 handle_call(Other, Sender, State) ->
   monitor_warn("Received unhandled synchronous message ~p from PID ~p.",
                [Other, Sender], State),

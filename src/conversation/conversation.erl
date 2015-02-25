@@ -27,11 +27,11 @@ initialise(SpecDir, Config) ->
 
 
 
-send(MonitorPID, Recipients, MessageName, Types, Payload)  ->
+send({ProtocolName, RoleName, MonitorPID}, Recipients, MessageName, Types, Payload)  ->
   gen_server:call(MonitorPID, {send_msg, Recipients, MessageName, Types, Payload}).
 
 % Used to transition to another role.
-become(MonitorPID, RoleName, Operation, Types, Arguments) ->
+become({ProtocolName, RoleName, MonitorPID}, RoleName, Operation, Types, Arguments) ->
   gen_server:call(MonitorPID, {become, RoleName, Operation, Types, Arguments}).
 
 % Starts a conversation, assigning the initiator to the given role.
