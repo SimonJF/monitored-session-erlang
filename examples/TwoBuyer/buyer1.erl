@@ -14,8 +14,15 @@
 ssactor_init(_Args, Monitor) ->
   % Start the conversation
   io:format("Starting conversation in buyer1.~n", []),
-  conversation:start_conversation(Monitor, "TwoBuyers", "A"),
-  conversation:send(Monitor, ["S"], "title", ["String"], ["To Kill a Mockingbird"]),
+  ConvStartRes = conversation:start_conversation(Monitor, "TwoBuyers", "A"),
+  case ConvStartRes of
+    {ok, ConvKey} ->
+      io:format("ConvKey in ssactor_init: ~p~n", [ConvKey]),
+      conversation:send(ConvKey, ["S"], "title", ["String"], ["To Kill a Mockingbird"]);
+    Err ->
+      error_logger:error_msg("Error starting conversation for protocol ~s (invite): ~p~n",
+                           ["TwoBuyers", Err])
+  end,
   no_state. % We don't need no state round these parts
 
 ssactor_handle_message(SenderRole, "quote", _, [QuoteInt], _State, Monitor) ->

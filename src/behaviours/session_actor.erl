@@ -90,7 +90,7 @@ handle_cast(Msg = {Protocol, Role, {message, _, Sender, _, Op, Types, Payload}},
   % Should we have some more complex callback here instead?
   NewUserState = Module:ssactor_handle_message(Sender, Op, Types, Payload,
                                            UserState,
-                                           {State#actor_state.monitor_pid, Protocol, Role}),
+                                           {Protocol, Role, State#actor_state.monitor_pid}),
   {noreply, State#actor_state{user_state=NewUserState}};
 handle_cast(Msg, State) ->
   actor_warn("Received unhandled asynchronous message ~p", [Msg], State),

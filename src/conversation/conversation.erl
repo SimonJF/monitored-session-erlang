@@ -28,11 +28,12 @@ initialise(SpecDir, Config) ->
 
 
 send({ProtocolName, RoleName, MonitorPID}, Recipients, MessageName, Types, Payload)  ->
-  gen_server:call(MonitorPID, {send_msg, Recipients, MessageName, Types, Payload}).
+  gen_server:call(MonitorPID, {send_msg, ProtocolName, RoleName, Recipients, MessageName,
+                               Types, Payload}).
 
 % Used to transition to another role.
 become({ProtocolName, RoleName, MonitorPID}, RoleName, Operation, Types, Arguments) ->
-  gen_server:call(MonitorPID, {become, RoleName, Operation, Types, Arguments}).
+  gen_server:call(MonitorPID, {become, ProtocolName, RoleName, Operation, Types, Arguments}).
 
 % Starts a conversation, assigning the initiator to the given role.
 start_conversation(MonitorPID, ProtocolName, Role) ->
@@ -48,7 +49,16 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
       ConversationProc = gen_server:start(conversation_instance, [ProtocolName, Roles], []),
       case ConversationProc of
         % And start the invitation system
-        {ok, ConvPID} -> protocol_registry:start_invitation(ProtocolName, ConvPID, Role, MonitorPID);
+        {ok, ConvPID} ->
+          InviteRes = protocol_registry:start_invitation(ProtocolName, ConvPID, Role, MonitorPID),
+          % Now, we'll know whether this has succeeded or not.
+          % If it has, we can return a key to use for the rest of the conversation.
+          % I'm wondering whether this is the best design. Perhaps an "after_invite" thing might work.
+          io:format("InviteRes in Conversation.erl: ~p~n", [InviteRes]),
+          case InviteRes of
+            {ok, ok} -> {ok, {ProtocolName, Role, MonitorPID}};
+            Err -> Err
+          end;
         Err ->
           error_logger:error_msg("Error starting conversation for protocol ~s: ~p~n",
                                  [ProtocolName, Err]),
