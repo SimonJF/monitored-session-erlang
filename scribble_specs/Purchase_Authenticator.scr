@@ -1,9 +1,0 @@
-module src.com.simonjf.scribbletest.Purchase_Authenticator;
-
-type <erlang> "string" from "" as String;
-type <erlang> "integer" from "" as Integer;
-
-local protocol Purchase at Authenticator(role Buyer,role Seller,role Authenticator) {
-	login(String) from Seller;
-	authenticate(String) to Buyer,Seller;
-}

@@ -161,9 +161,16 @@ handle_incoming_message(MessageData, ConversationID, State) ->
     _Err -> {noreply, State} % assuming the error has been logged already
   end.
 
-handle_become(ProtocolName, RoleName, Operation, Arguments, State) ->
+handle_become(RoleName, Operation, Arguments, State) ->
   RecipientPID = State#conv_state.actor_pid,
-  gen_server:cast(RecipientPID, {ProtocolName, RoleName, {become, Operation, Arguments}}).
+  ProtocolRoleMap = State#conv_state.protocol_role_map,
+  ProtocolRes = bidirectional_map:find_right(RoleName, ProtocolRoleMap),
+  case ProtocolRes of
+    {ok, ProtocolName} ->
+      gen_server:cast(RecipientPID, {ProtocolName, RoleName, {become, Operation, Arguments}}),
+      {reply, ok, State};
+    error -> {reply, error, bad_role}
+  end.
 
 
 handle_outgoing_message(CurrentProtocol, _CurrentRole, Recipients,
@@ -255,8 +262,8 @@ handle_call({send_msg, CurrentProtocol, CurrentRole, Recipients,
              MessageName, Types, Payload}, _Sender, State) ->
   handle_outgoing_message(CurrentProtocol, CurrentRole, Recipients,
                           MessageName, Types, Payload, State);
-%handle_call({become, RoleName, Op, Types, Arguments}, _Sender, State) ->
-%  handle_become(RoleName, Op, Types, Arguments, State);
+handle_call({become, RoleName, Op, Arguments}, _Sender, State) ->
+  handle_become(RoleName, Op, Arguments, State);
 handle_call(Other, Sender, State) ->
   monitor_warn("Received unhandled synchronous message ~p from PID ~p.",
                [Other, Sender], State),

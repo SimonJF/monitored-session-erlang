@@ -67,6 +67,8 @@ invite_actor_role(RoleName, ConversationID, State) ->
   ProtocolName = protocol_name(State),
   RoleActorMapping = State#protocol_state.role_actor_mapping,
   ActorTypeRes = orddict:find(RoleName, RoleActorMapping),
+  io:format("Trying to find role ~s in Role->Actor map for protocol ~p~n",
+            [RoleName, ProtocolName]),
   case ActorTypeRes of
     {ok, ActorType} ->
       actor_type_registry:invite_actor_to_role(ActorType,
@@ -74,7 +76,7 @@ invite_actor_role(RoleName, ConversationID, State) ->
                                                RoleName,
                                                ConversationID);
     error ->
-      {error, no_registered_actor}
+      {error, no_registered_actor_pt}
   end.
 
 invite_actor_direct(RoleName, ActorMonitorPID, ConversationID, State) ->

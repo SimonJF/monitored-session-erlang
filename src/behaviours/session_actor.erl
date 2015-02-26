@@ -33,7 +33,7 @@
 %   NewState
 behaviour_info(callbacks) ->
     [{ssactor_init,2},
-     {ssactor_handle_msg, 6},
+     {ssactor_handle_message, 6},
      {ssactor_become, 5}
     ];
 behaviour_info(_Other) ->

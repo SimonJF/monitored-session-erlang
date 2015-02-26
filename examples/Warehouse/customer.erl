@@ -7,7 +7,7 @@ ssactor_init(_Args, Monitor) ->
   ConvRes = conversation:start_conversation(Monitor, "Purchase", "Buyer"),
   case ConvRes of
     {ok, ConvKey} ->
-      actor_logger:info("Sending getStockList to seller"),
+      actor_logger:info(customer, "Sending getStockList to seller", []),
       conversation:send(ConvKey, ["Seller"], "getStockList", [], []);
     Err ->
       actor_logger:error(customer, "Error starting conversation: ~p~n", [Err])
@@ -28,5 +28,5 @@ ssactor_handle_message(_SenderRole, "error", _, [Err], State, Monitor) ->
   conversation:send(Monitor, ["Seller"], "quit", [], []),
   State.
 
-ssactor_become(_, _, State) -> State.
+ssactor_become(_, _, _, _, State) -> State.
 
