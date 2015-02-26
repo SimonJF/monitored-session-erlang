@@ -32,8 +32,8 @@ send({ProtocolName, RoleName, MonitorPID}, Recipients, MessageName, Types, Paylo
                                Types, Payload}).
 
 % Used to transition to another role.
-become({ProtocolName, RoleName, MonitorPID}, RoleName, Operation, Types, Arguments) ->
-  gen_server:call(MonitorPID, {become, ProtocolName, RoleName, Operation, Types, Arguments}).
+become({ProtocolName, RoleName, MonitorPID}, RoleName, Operation, Arguments) ->
+  gen_server:call(MonitorPID, {become, ProtocolName, RoleName, Operation, Arguments}).
 
 % Starts a conversation, assigning the initiator to the given role.
 start_conversation(MonitorPID, ProtocolName, Role) ->

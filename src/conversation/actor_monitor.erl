@@ -161,37 +161,9 @@ handle_incoming_message(MessageData, ConversationID, State) ->
     _Err -> {noreply, State} % assuming the error has been logged already
   end.
 
-
-% handle_become(RoleName, Op, Types, Arguments, State) ->
-%   % Transition to new role and deliver the message
-%   ProtocolRoleMap = State#conv_state.protocol_role_map,
-%   ActiveProtocols = State#conv_state.active_protocols,
-%   ProtocolRes= bidirectional_map:find_right(RoleName, ProtocolRoleMap),
-%   case ProtocolRes of
-%     {ok, ProtocolName} ->
-%       RecipientPID = State#conv_state.actor_pid,
-%       gen_server:cast(RecipientPID, Msg).
-%
-%       ConversationIDRes = bidirectional_map:find_right(CurrentProtocol, ActiveProtocols),
-%       case ConversationIDRes of
-%         {ok, ConversationID} ->
-%           gen_server:cast(ConversationID, {outgoing_msg, Msg}).
-%
-%   case {ConversationIDRes, RoleRes} of
-%     {{ok, ConversationID}, {ok, RoleName}} ->
-%       MessageData = message:message(make_ref(), RoleName, Recipients,
-%                                     MessageName, Types, Payload),
-%       MonitorRes = monitor_msg(send, MessageData, ConversationID, State),
-%       case MonitorRes of
-%         {ok, NewState} -> {reply, ok, NewState};
-%         Err -> {reply, Err, State}
-%       end;
-%     {_, Err} ->
-%       monitor_warn("Couldn't find current role for active protocol ~s.~n",
-%                    [CurrentProtocol], State),
-%       {reply, Err, State}
-%   end.
-
+handle_become(ProtocolName, RoleName, Operation, Arguments, State) ->
+  RecipientPID = State#conv_state.actor_pid,
+  gen_server:cast(RecipientPID, {ProtocolName, RoleName, {become, Operation, Arguments}}).
 
 
 handle_outgoing_message(CurrentProtocol, _CurrentRole, Recipients,

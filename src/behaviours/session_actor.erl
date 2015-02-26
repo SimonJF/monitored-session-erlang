@@ -33,7 +33,9 @@
 %   NewState
 behaviour_info(callbacks) ->
     [{ssactor_init,2},
-     {ssactor_handle_msg, 6}];
+     {ssactor_handle_msg, 6},
+     {ssactor_become, 5}
+    ];
 behaviour_info(_Other) ->
     undefined.
 
@@ -91,6 +93,12 @@ handle_cast(Msg = {Protocol, Role, {message, _, Sender, _, Op, Types, Payload}},
   NewUserState = Module:ssactor_handle_message(Sender, Op, Types, Payload,
                                            UserState,
                                            {Protocol, Role, State#actor_state.monitor_pid}),
+  {noreply, State#actor_state{user_state=NewUserState}};
+handle_cast(_Msg = {Protocol, Role, {become, Operation, Arguments}}, State) ->
+  Module = State#actor_state.actor_type_name,
+  UserState = State#actor_state.user_state,
+  NewUserState = Module:ssactor_become(Role, Operation, Arguments,
+                                       {Protocol, Role, State#actor_state.monitor_pid}, UserState),
   {noreply, State#actor_state{user_state=NewUserState}};
 handle_cast(Msg, State) ->
   actor_warn("Received unhandled asynchronous message ~p", [Msg], State),

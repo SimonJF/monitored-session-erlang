@@ -1,6 +1,7 @@
 {["src/behaviours/*", "src/*", "src/parser/*", "src/monitor/*",
 	"src/conversation/*", "src/util/*",
 	"examples/TwoBuyer/*",
+	"examples/Warehouse/*",
 	"examples/*",
 	"tests/monitor/*", "tests/util/*"],
 					[debug_info,
