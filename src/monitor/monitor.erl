@@ -174,7 +174,6 @@ can_receive_at(Message, {receive_node, _Id, Info}, _MonitorInstance) ->
     {_, _, false} -> {false, bad_payload_types}
   end;
 can_receive_at(_Message, MonitorNode, _MonitorInstance) ->
-  io:format("Monitor recv, bad node type: ~p~n", [MonitorNode]),
   {false, bad_node_type}.
 
 
@@ -190,7 +189,6 @@ can_send_at(Message, {send_node, _Id, Info}, _MonitorInstance) ->
     {_, _, false} -> {false, bad_payload_types}
   end;
 can_send_at(_Message, MonitorNode, _MonitorInstance) ->
-  io:format("Monitor send, bad node type: ~p~n", [MonitorNode]),
   {false, bad_node_type}.
 
 

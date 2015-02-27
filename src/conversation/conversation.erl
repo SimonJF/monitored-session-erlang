@@ -11,21 +11,11 @@
 
 % Initialises the system. Must be called prior to doing anything else!
 initialise(SpecDir, Config) ->
-  ProtocolMappings = protocol_loader:load_protocol_files(SpecDir),
-  % Start the protocol registry, and register it to the atom protocol_registry.
-  % This will also start all of the protocol processes.
-  {ok, _PRPid} = gen_server:start_link({local, ?PROTOCOL_REGISTRY},
-                                      protocol_registry,
-                                      [ProtocolMappings, Config], []),
+  error_logger:info_msg("Initialising conversation system.~n", []),
+  supervisor:start_link(conversation_runtime_sup, [SpecDir, Config]).
 
-  % Next: start the actor type registry.
-  {ok, _ATRPid} = gen_server:start_link({local, ?ACTOR_TYPE_REGISTRY},
-                                        actor_type_registry, [Config],
-                                        []),
-  error_logger:info_msg("Successfully initialised conversation system.~n", []),
-  ok.
-
-
+teardown() ->
+  conversation_runtime_sup:teardown().
 
 send({ProtocolName, RoleName, MonitorPID}, Recipients, MessageName, Types, Payload)  ->
   gen_server:call(MonitorPID, {send_msg, ProtocolName, RoleName, Recipients, MessageName,
@@ -54,7 +44,6 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
           % Now, we'll know whether this has succeeded or not.
           % If it has, we can return a key to use for the rest of the conversation.
           % I'm wondering whether this is the best design. Perhaps an "after_invite" thing might work.
-          io:format("InviteRes in Conversation.erl: ~p~n", [InviteRes]),
           case InviteRes of
             {ok, ok} -> {ok, {ProtocolName, Role, MonitorPID}};
             Err -> Err

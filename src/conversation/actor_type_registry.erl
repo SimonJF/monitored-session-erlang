@@ -7,6 +7,9 @@
 %%% Registry for actor types.
 %%% Maps actor type names to actor type processes.
 %%% Note: actor type processes != actor instances!
+start_link(Args) ->
+  gen_server:start_link({local, ?ACTOR_TYPE_REGISTRY}, actor_type_registry, Args, []).
+
 
 spawn_child(ActorModuleName, ProtocolRoleMap, ProcDict) ->
   Result = gen_server:start(actor_type, [ActorModuleName, ProtocolRoleMap], []),

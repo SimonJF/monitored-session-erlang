@@ -6,10 +6,9 @@
 %%% Registry for protocol processes.
 %%% Maps protocol names to protocol processes.
 
-% TODO: Treat this as a supervisor too, instead of
-% treating each protocol process as part of the error
-% kernel?
 
+start_link(Args) ->
+  gen_server:start_link({local, ?PROTOCOL_REGISTRY}, protocol_registry, Args, []).
 
 % Find the actors which are involved in the protocol, and devise a mapping
 % from roles to actor types.

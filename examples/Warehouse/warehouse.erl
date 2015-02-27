@@ -76,7 +76,6 @@ ssactor_handle_message("Store", "acc", _, _, _, State) -> State.
 
 % ssactor_become: Rolename, Operation, Parameters
 ssactor_become("Store", restock, [ItemName, Quantity], Monitor, State) ->
-  io:format("SSACTOR_BECOME: Monitor:~p~n", [Monitor]),
   actor_logger:info(warehouse, "StoreLoad protocol: sending restock request", []),
   conversation:send(Monitor, ["Dealer"], "request", ["String", "Integer"], [ItemName, Quantity]),
   State.
