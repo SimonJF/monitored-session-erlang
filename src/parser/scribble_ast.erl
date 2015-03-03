@@ -47,6 +47,12 @@ role_decl(Role) ->
 role_decl(Role, Alias) ->
   {role_decl_alias, Role, Alias}.
 
+transient_role_decl(Role) ->
+  {transient_role_decl, Role}.
+
+transient_role_decl(Role, Alias) ->
+  {transient_role_decl_alias, Role, Alias}.
+
 role_instantiation(Name) ->
   {role_instantiation, Name}.
 
@@ -159,3 +165,7 @@ local_interruptible(ScopeName, InterruptibleBlock, LocalCatches) ->
 % With a throw clause
 local_interruptible(ScopeName, InterruptibleBlock, LocalThrow, LocalCatches) ->
   {local_interruptible_throw, ScopeName, InterruptibleBlock, LocalThrow, LocalCatches}.
+
+% Experimental addition: X invites Y, used for temporary role population
+local_invites(Inviter, Invitee, Interactions) ->
+  {local_invites, Inviter, Invitee, Interactions}.

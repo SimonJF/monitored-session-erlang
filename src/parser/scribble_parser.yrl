@@ -76,7 +76,8 @@ roledecl
 simplemembername
 module_ident_inner
 module_ident_inners
-ext_identifier.
+ext_identifier
+localinvites.
 
 
 
@@ -88,7 +89,8 @@ rec_kw continue_kw par_kw and_kw interruptible_kw with_kw by_kw
 throws_kw catches_kw do_kw left_brace right_brace left_bracket
 right_bracket left_square_bracket right_square_bracket colon forward_slash
 back_slash dot hash ampersand question_mark exlamation_mark underscore
-comma semicolon less_than greater_than ident ext_ident.
+comma semicolon less_than greater_than ident ext_ident transient_kw
+invitation_kw for_kw.
 
 
 % Module is the root symbol.
@@ -190,7 +192,8 @@ roledecllistinner -> comma roledecl roledecllistinner : ['$2'|'$3'].
 
 roledecl -> role_kw identifier : scribble_ast:role_decl('$2').
 roledecl -> role_kw identifier as_kw identifier : scribble_ast:role_decl('$2', '$4').
-
+roledecl -> transient_kw role_kw identifier : scribble_ast:transient_role_decl('$3').
+roledecl -> transient_kw role_kw identifier as_kw identifier : scribble_ast:transient_role_decl('$3', '$5').
 
 parameterdecllist -> less_than parameterdecl parameterdecllistinner greater_than :
   ['$2'|'$3'].
@@ -337,7 +340,7 @@ localinteraction -> localrecursion : '$1'.
 localinteraction -> localcontinue : '$1'.
 localinteraction -> localinterruptible : '$1'.
 localinteraction -> localdo : '$1'.
-
+localinteraction -> localinvites : '$1'.
 
 localsend -> message to_kw identifier identifierlist semicolon:
   scribble_ast:local_send('$1', ['$3'|'$4']).
@@ -387,6 +390,9 @@ localdo -> do_kw identifier colon membername roleinstantiationlist semicolon:
 localdo -> do_kw identifier colon membername argumentlist roleinstantiationlist semicolon:
   scribble_ast:do_scope('$2', '$4', '$5', '$6').
 
+
+localinvites -> invitation_kw from_kw identifier for_kw identifier localprotocolblock :
+  scribble_ast:local_invites('$3', '$5', '$6').
 
 Erlang code.
 unwrap({_, V}) -> V;

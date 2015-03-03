@@ -68,6 +68,9 @@ BYKW = by
 THROWSKW = throws
 CATCHESKW = catches
 DOKW = do
+TRANSIENTKW = transient
+INVITATIONKW = invitation
+FORKW = for
 
 % --- Lexer Rules ---
 
@@ -99,6 +102,10 @@ Rules.
 {THROWSKW} : make_token(throws_kw, TokenLine, TokenChars).
 {CATCHESKW} : make_token(catches_kw, TokenLine, TokenChars).
 {DOKW} : make_token(do_kw, TokenLine, TokenChars).
+{TRANSIENTKW} : make_token(transient_kw, TokenLine, TokenChars).
+{INVITATIONKW} : make_token(invitation_kw, TokenLine, TokenChars).
+{FORKW} : make_token(for_kw, TokenLine, TokenChars).
+
 
 % Identifiers
 {IDENTIFIER} : make_token(ident, TokenLine, TokenChars).

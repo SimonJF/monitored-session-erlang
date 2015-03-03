@@ -8,7 +8,7 @@ global protocol HandleDNSRequest(
     GetNearestZone(Zone) from DNSQueryResolver to DNSZoneRegServer;
     ZoneResponse(Resonse) from DNSZoneDataServer to DNSQueryResolver;
     choice at DNSQueryResolver {
-      DNSQueryResolver invites DNSZoneDataServer {
+      invitation from DNSQueryResolver for DNSZoneDataServer {
         GetZoneData() from DNSQueryResolver to DNSZoneDataServer;
         ZoneDataResponse(Response) from DNSZoneDataServer to DNSQueryResolver;
 
