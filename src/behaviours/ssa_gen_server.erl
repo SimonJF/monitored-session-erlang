@@ -1,4 +1,4 @@
--module(session_actor).
+-module(ssa_gen_server).
 -behaviour(gen_server).
 
 -compile(export_all).
@@ -34,10 +34,17 @@
 behaviour_info(callbacks) ->
     [{ssactor_init,2},
      {ssactor_handle_message, 6},
-     {ssactor_become, 5}
+     {ssactor_become, 5},
+     {handle_call, 3},
+     {handle_cast, 3},
+     {handle_info, 3},
+     {terminate, 2}
     ];
 behaviour_info(_Other) ->
     undefined.
+
+update_user_state(SystemState, NewUserState) ->
+  SystemState#actor_state{user_state = NewUserState}.
 
 log_msg(Func, Format, Args, State) ->
   InfoStr = "SSACTOR: Actor ~p, actor PID ~p, monitor PID ~p.",
@@ -76,11 +83,57 @@ init([Module, UserArgs]) ->
   end.
 
 
-% We shouldn't have any synchronous calls -- log and ignore.
-handle_call(Request, _From, State) ->
-  actor_warn("Received unhandled synchronous message ~p", [Request], State),
-  {noreply, State}.
+% Delegate calls, casts (other than ssa internal messages), info messages and temrination
+% messages to the actor.
 
+delegate_async(Fun, Msg, State) ->
+  Module = State#actor_state.actor_type_name,
+  UserState = State#actor_state.user_state,
+  UserResult = case Fun of
+                 handle_cast ->
+                   Module:handle_cast(Msg, UserState);
+                 handle_info ->
+                   Module:handle_info(Msg, UserState)
+               end,
+  % Propagate user state changes without losing system state
+  case UserResult of
+    {noreply, NewUserState} ->
+      NewState = update_user_state(State, NewUserState),
+      {noreply, NewState};
+    {noreply, NewUserState, Arg} ->
+      NewState = update_user_state(State, NewUserState),
+      {noreply, NewState, Arg};
+    {stop, Reason, NewUserState} ->
+      NewState = update_user_state(State, NewUserState),
+      {stop, Reason, NewState}
+  end.
+
+% Same for synchronous messages, but there are a couple more things we need
+% to handle, in particular re: replies
+handle_call(Request, From, State) ->
+  Module = State#actor_state.actor_type_name,
+  UserState = State#actor_state.user_state,
+  UserResult = Module:handle_call(Request, From, UserState),
+  case UserResult of
+    {reply, Reply, NewUserState} ->
+      NewState = update_user_state(State, NewUserState),
+      {reply, Reply, NewState};
+    {reply, Reply, NewUserState, Arg} ->
+      NewState = update_user_state(State, NewUserState),
+      {reply, Reply, NewState, Arg};
+    {noreply, NewUserState} ->
+      NewState = update_user_state(State, NewUserState),
+      {noreply, NewState};
+    {noreply, NewUserState, Arg} ->
+      NewState = update_user_state(State, NewUserState),
+      {noreply, NewState, Arg};
+    {stop, Reason, Reply, NewUserState} ->
+      NewState = update_user_state(State, NewUserState),
+      {stop, Reason, Reply, NewState};
+    {stop, Reason, NewUserState} ->
+      NewState = update_user_state(State, NewUserState),
+      {stop, Reason, NewState}
+  end.
 
 % Handle incoming user messages. These have been checked by the monitor to
 % ensure that they conform to the MPST.
@@ -101,28 +154,40 @@ handle_cast(_Msg = {Protocol, Role, {become, Operation, Arguments}}, State) ->
                                        {Protocol, Role, State#actor_state.monitor_pid}, UserState),
   {noreply, State#actor_state{user_state=NewUserState}};
 handle_cast(Msg, State) ->
-  actor_warn("Received unhandled asynchronous message ~p", [Msg], State),
-  {noreply, State}.
+  delegate_async(handle_cast, Msg, State).
 
 
 % Info messages -- we don't do anything with these
 handle_info(Msg, State) ->
-  actor_warn("Received unhandled info message ~p", [Msg], State),
-  {noreply, State}.
-
+  delegate_async(handle_info, Msg, State).
 
 % We don't need this.
 code_change(_PreviousVersion, State, _Extra) ->
   {ok, State}.
 
 terminate(Reason, State) ->
-  actor_error("Actor terminating for reason ~w", [Reason], State),
+  actor_error("Actor terminating for reason ~p", [Reason], State),
   Module = State#actor_state.actor_type_name,
   MonitorPID = State#actor_state.monitor_pid,
   actor_type_registry:deregister_actor_instance(Module, MonitorPID),
+  Module:terminate(Reason, State),
   ok.
 
 % Public API
-spawn(ModuleName, Args) ->
-  gen_server:start(session_actor, [ModuleName, Args], []).
+start(ModuleName, Args, Options) ->
+  gen_server:start(ssa_gen_server, [ModuleName, Args], Options).
 
+start_link(ModuleName, Args, Options) ->
+  gen_server:start_link(ssa_gen_server, [ModuleName, Args], Options).
+
+call(ServerRef, Message) ->
+  gen_server:call(ServerRef, Message).
+
+call(ServerRef, Message, Timeout) ->
+  gen_server:call(ServerRef, Message, Timeout).
+
+cast(ServerRef, Message) ->
+  gen_server:cast(ServerRef, Message).
+
+reply(ServerRef, Message) ->
+  gen_server:reply(ServerRef, Message).

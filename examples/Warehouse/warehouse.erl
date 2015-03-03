@@ -1,5 +1,5 @@
 -module(warehouse).
--behaviour(session_actor).
+-behaviour(ssa_gen_server).
 -compile(export_all).
 -record(warehouse_state, {item_db}).
 -define(RESTOCK_AMOUNT, 5).

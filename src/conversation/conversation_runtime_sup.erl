@@ -16,8 +16,6 @@ init([SpecDir, Config]) ->
                                         [[Config]]},
                      permanent, brutal_kill, worker, [actor_type_registry]},
   {ok, {{one_for_all, 2, 60}, [ProtocolRegProc, ActorRegProc]}}.
-  %{ok, {{one_for_all, 2, 60}, [ActorRegProc]}}.
-
 
 teardown() ->
   exit(whereis(?RUNTIME_PROC_NAME), kill).

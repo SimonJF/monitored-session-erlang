@@ -1,5 +1,5 @@
 -module(buyer1).
--behaviour(session_actor).
+-behaviour(ssa_gen_server).
 -compile(export_all).
 
 % Buyer 1:

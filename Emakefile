@@ -3,7 +3,7 @@
 	"examples/TwoBuyer/*",
 	"examples/Warehouse/*",
 	"examples/*",
-	"tests/monitor/*", "tests/util/*"],
+	"tests/monitor/*", "tests/util/*", "tests/behaviour/*"],
 					[debug_info,
            {i, "src"},
            {i, "include"},

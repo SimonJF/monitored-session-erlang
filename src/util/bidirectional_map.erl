@@ -46,7 +46,6 @@ contains_right(Right, {_, RightMap}) ->
   orddict:is_key(Right, RightMap).
 
 from_orddict(Orddict) ->
-  % fold(Fun, Acc0, Orddict) -> Acc1
   orddict:fold(fun(K, V, BiMap) -> store(K, V, BiMap) end,
                new(), Orddict).
 

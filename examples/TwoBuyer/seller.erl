@@ -1,5 +1,5 @@
 -module(seller).
--behaviour(session_actor).
+-behaviour(ssa_gen_server).
 -compile(export_all).
 -define(PRICE, 40).
 -define(DELIVERY_DATE, "Sometime in the future").

@@ -1,5 +1,5 @@
 -module(buyer2).
--behaviour(session_actor).
+-behaviour(buyer2).
 -compile(export_all).
 -define(PRICE_THRESHOLD, 50).
 
