@@ -7,10 +7,10 @@ main() ->
   % Initialise the conversation runtime.
   conversation:initialise(?SPEC_DIR, warehouse_conf:config()),
   io:format("Initialised successfully~n"),
-  {ok, _} = ssa_gen_server:spawn(dealer, []),
-  io:format("Spawned dealer successfully~n"),
-  {ok, _} = ssa_gen_server:spawn(warehouse, []),
-  io:format("Spawned warehouse successfully~n"),
-  {ok, _} = ssa_gen_server:spawn(customer, []),
-  io:format("Spawned customer successfully~n"),
+  {ok, _} = ssa_gen_server:start(dealer, [], []),
+  io:format("started dealer successfully~n"),
+  {ok, _} = ssa_gen_server:start(warehouse, [], []),
+  io:format("started warehouse successfully~n"),
+  {ok, _} = ssa_gen_server:start(customer, [], []),
+  io:format("started customer successfully~n"),
   ok.
