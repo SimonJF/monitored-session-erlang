@@ -127,3 +127,10 @@ start_invitation(ProtocolName, ConversationID, InitiatorRole, InitiatorPID) ->
                     end,
   with_protocol_process(ProtocolName, StartInviteFunc).
 
+invite_actor_direct(ProtocolName, ConversationID, RoleName, InviteeMonitorPID) ->
+  InviteDirectFunc = fun (ProtocolPid) ->
+                         gen_server:call(ProtocolPid,
+                                         {delayed_invitation, InviteeMonitorPID,
+                                          RoleName, ConversationID})
+                     end,
+  with_protocol_process(ProtocolName, InviteDirectFunc).

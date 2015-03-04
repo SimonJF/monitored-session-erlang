@@ -96,6 +96,10 @@ init([ProtocolName, RoleSpecs, RoleMapping]) ->
 
   {ok, State}.
 
+handle_delayed_invite(InviteeMonitorPID, RoleName, ConversationID, State) ->
+  InviteRes = invite_actor_direct(RoleName, InviteeMonitorPID, ConversationID, State),
+  {reply, InviteRes, State}.
+
 handle_call({get_monitor, RoleName}, _From, State) ->
   % orddict:find's return type is as good as any -- {ok, Monitor}
   % if we have the monitor, error if not
@@ -106,6 +110,8 @@ handle_call(get_roles, _From, State) ->
 handle_call({begin_invitation, ConversationID, InitiatorRole, InitiatorPID},
             _From, State) ->
   invite_actors(ConversationID, InitiatorRole, InitiatorPID, State);
+handle_call({delayed_invitation, InviteeMonitorPID, RoleName, ConversationID}, _From, State) ->
+  handle_delayed_invite(InviteeMonitorPID, RoleName, ConversationID, State);
 handle_call(Other, _From, State) ->
   error_logger:warning_msg("WARN: Protocol process ~s received " ++
                            "unhandled synchronous messsage ~p.~n",

@@ -251,6 +251,30 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
   end.
 
 
+handle_send_delayed_invite(ProtocolName, InviteeMonitorPid, RoleName, State) ->
+  ActiveProtocols = State#conv_state.active_protocols,
+  ConversationIDRes = bidirectional_map:find_left(ProtocolName, ActiveProtocols),
+  case ConversationIDRes of
+    {ok, ConversationID} ->
+      % TODO: Adding the lookup step in actor_monitor as opposed to having
+      % ConversationID as part of the ConvKey means we can't invite ourselves
+      % to the conversation (deadlock due to synchronous calls).
+      % Not a problem at the moment as we can only perform one role per protocol,
+      % but might be worth revisiting later on.
+      InviteRes = protocol_registry:invite_actor_direct(ProtocolName,
+                                                        ConversationID,
+                                                        RoleName,
+                                                        InviteeMonitorPid),
+      case InviteRes of
+        {ok, ok} -> {reply, ok, State};
+        % Found protocol, but error in invitation
+        {ok, Err} -> {reply, err, State};
+        % Couldn't find protocol
+        Err -> {reply, Err, State}
+      end;
+    error -> {error, not_in_conversation}
+  end.
+
 % Synchronous messages:
 %  * Invitation
 %  * Termination
@@ -264,6 +288,9 @@ handle_call({send_msg, CurrentProtocol, CurrentRole, Recipients,
                           MessageName, Types, Payload, State);
 handle_call({become, RoleName, Op, Arguments}, _Sender, State) ->
   handle_become(RoleName, Op, Arguments, State);
+handle_call({send_delayed_invite, ProtocolName, InviteeMonitorPid, RoleName},
+            _Sender, State) ->
+  handle_send_delayed_invite(ProtocolName, InviteeMonitorPid, RoleName, State);
 handle_call(Other, Sender, State) ->
   monitor_warn("Received unhandled synchronous message ~p from PID ~p.",
                [Other, Sender], State),
