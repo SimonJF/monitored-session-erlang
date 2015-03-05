@@ -5,7 +5,6 @@
 -behaviour(supervisor).
 
 init([SpecDir, Config]) ->
-  register(?RUNTIME_PROC_NAME, self()),
   ProtocolMappings = protocol_loader:load_protocol_files(SpecDir),
   ProtocolRegProc = {protocol_registry, {protocol_registry,
                                          start_link,
