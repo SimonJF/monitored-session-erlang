@@ -1,0 +1,5 @@
+module src.com.simonjf.scribbletest.DelayedTest_A;
+
+local protocol DelayedTest at A(role A,role B, transient role C) {
+	X() to B;
+}
