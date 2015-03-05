@@ -63,3 +63,4 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
 
 invite({ProtocolName, RoleName, MonitorPID}, InviteeMonitorPID, RoleName) ->
   gen_server:call(MonitorPID, {send_delayed_invite, ProtocolName, InviteeMonitorPID, RoleName}).
+

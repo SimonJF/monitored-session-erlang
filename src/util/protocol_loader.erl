@@ -20,17 +20,10 @@ extract_protocols(Other) ->
   [].
 
 
-% update(Key, Fun, Initial, Orddict1) -> Orddict2
-%
-% Types:
-%
-% Key = Initial = term()
-% Fun = fun((Value1 :: term()) -> Value2 :: term())
-% Orddict1 = Orddict2 = orddict()
-
 append_protocol_roles(ProtocolEntries, Dict) ->
   lists:foldl(fun({ProtocolName, RoleName, ProtocolAST}, RunningPRD) ->
                   % First, get the ProtocolName |-> RoleSpec dict
+                  io:format("Storing role ~s to rolespec ~p mapping ~n", [RoleName, ProtocolAST]),
                   ProtocolRoleDictRes = orddict:find(ProtocolName, RunningPRD),
                   case ProtocolRoleDictRes of
                     {ok, ProtocolRoleDict} ->

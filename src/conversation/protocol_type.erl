@@ -33,6 +33,21 @@ generate_monitors(RoleSpecList, ProtocolName) ->
                                                [ProtocolName, Role, Other])
                   end end, orddict:new(), RoleSpecList).
 
+% Checks whether a role is transient, given a role name and local protocol spec
+is_role_transient(RoleName, {local_protocol, _, _, _, Roles, _}) ->
+  is_role_transient_inner(RoleName, Roles);
+is_role_transient(_, _) -> false.
+
+is_role_transient_inner(_RN, []) -> false;
+is_role_transient_inner(RoleName, [X|XS]) ->
+  RoleTy = element(1, X),
+  Name = element(2, X),
+  if RoleName == Name ->
+       (RoleTy == transient_role_decl) or (RoleTy == transient_role_decl_alias);
+     RoleName =/= Name ->
+       is_role_transient_inner(RoleName, XS)
+  end.
+
 
 % Invite actor instances to partake in a conversation, given the conversation
 % ID and the role mapping.
@@ -43,9 +58,18 @@ invite_actors(ConversationID, InitiatorRole, InitiatorPID, State) ->
   case Res of
     ok ->
       % For each role in turn, attempt to invite an actor.
-      Roles = orddict:fetch_keys(State#protocol_state.role_specs),
-      FilteredRoles = lists:filter(fun(Role) -> Role =/= InitiatorRole end,
-                                    Roles),
+      % Only invite actors to fill non-transient roles, and roles which aren't
+      % the initiator (as this is fulfilled directly)
+      Roles = orddict:to_list(State#protocol_state.role_specs),
+      FilteredRoles = lists:filtermap(fun({Role, RoleSpec}) ->
+                                       RoleTransient = is_role_transient(Role, RoleSpec),
+                                       ShouldInvite = (Role =/= InitiatorRole) and (not RoleTransient),
+                                       if ShouldInvite ->
+                                            {true, Role};
+                                          true -> false
+                                       end
+                                   end, Roles),
+      io:format("Filtered roles: ~p~n", [FilteredRoles]),
       Res2 = invite_actors_inner(FilteredRoles, ConversationID, State),
       {reply, Res2, State};
     {error, Err} -> {error, {initiator_unable_to_fulfil, Err}}
