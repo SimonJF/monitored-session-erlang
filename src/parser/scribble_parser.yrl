@@ -391,8 +391,8 @@ localdo -> do_kw identifier colon membername argumentlist roleinstantiationlist 
   scribble_ast:do_scope('$2', '$4', '$5', '$6').
 
 
-localinvites -> invitation_kw from_kw identifier for_kw identifier localprotocolblock :
-  scribble_ast:local_invites('$3', '$5', '$6').
+localinvites -> invitation_kw for_kw identifier localprotocolblock :
+  scribble_ast:local_invites('$3', '$4').
 
 Erlang code.
 unwrap({_, V}) -> V;

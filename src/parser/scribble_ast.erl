@@ -166,6 +166,5 @@ local_interruptible(ScopeName, InterruptibleBlock, LocalCatches) ->
 local_interruptible(ScopeName, InterruptibleBlock, LocalThrow, LocalCatches) ->
   {local_interruptible_throw, ScopeName, InterruptibleBlock, LocalThrow, LocalCatches}.
 
-% Experimental addition: X invites Y, used for temporary role population
-local_invites(Inviter, Invitee, Interactions) ->
-  {local_invites, Inviter, Invitee, Interactions}.
+local_invites(Invitee, Interactions) ->
+  {local_invites, Invitee, Interactions}.
