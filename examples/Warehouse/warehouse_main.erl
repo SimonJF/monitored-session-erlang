@@ -2,7 +2,7 @@
 -compile(export_all).
 -define(SPEC_DIR, "scribble_specs").
 
-% Main entry point for the two-buyer protocol example.
+% Main entry point for the warehouse protocol example.
 main() ->
   % Initialise the conversation runtime.
   conversation:initialise(?SPEC_DIR, warehouse_conf:config()),

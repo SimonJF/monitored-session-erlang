@@ -61,7 +61,11 @@ instruction_size({local_interruptible_throw, _, InterruptibleBlock, _, _}) ->
 instruction_size({do, _, _, _}) -> 0;
 instruction_size({do_scope, _, _, _}) -> 0;
 % Continue's just a transition.
-instruction_size({continue, _}) -> 0.
+instruction_size({continue, _}) -> 0;
+% TODO: It would be nice (probably theoretically a necessity) to have the
+% invitations go through the monitor, and have an invites_node; the transition
+% from which is contingent on a participant being successfully invited.
+instruction_size({local_invites, _, InvitesBlock}) -> block_size(InvitesBlock).
 
 node_type({local_send, _, _}) -> simple_transition;
 node_type({local_receive, _, _}) -> simple_transition;
@@ -71,6 +75,7 @@ node_type({parallel, _}) -> new_scope;
 node_type({local_interruptible, _, _, _}) -> new_scope;
 node_type({local_interruptible_throw, _, _, _, _}) -> new_scope;
 node_type({continue, _}) -> tau_transition;
+node_type({local_invites, _, _}) -> new_scope;
 node_type(_Other) -> io:format("Other: ~p~n", [_Other]),
                      other.
 
@@ -237,7 +242,18 @@ evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, RunningID, States, Transitio
           NewMuMap = orddict:store(MuName, RecNodeID, MuMap),
           RecScope = scope("rec", Interactions, ScopeEndIndex, NewMuMap),
           {RID2, States2, Transitions3} = evaluate_scope(RecScope, RID1, States1, Transitions2),
-          evaluate_scope_inner(XS, ScopeEndIndex, RID2, States2, Transitions3, MuMap);
+          evaluate_scope_inner(XS, EndIndex, RID2, States2, Transitions3, MuMap);
+        {local_invites, _InviteeRole, Interactions} ->
+          % TODO Really need to refactor this
+          BlockSize = block_size(Interactions),
+          ScopeEndIndex = RunningID + BlockSize,
+          Transitions1 = if BlockSize > 0 ->
+                             add_transition(RunningID, RunningID + 1, Transitions);
+                            BlockSize == 0 -> Transitions
+                         end,
+          InvitesScope = scope("invites", Interactions, ScopeEndIndex, MuMap),
+          {RID, States1, Transitions2} = evaluate_scope(InvitesScope, RunningID, States, Transitions1),
+          evaluate_scope_inner(XS, EndIndex, RID, States1, Transitions2, MuMap);
         Other -> {error, monitor_gen, unsupported_node, Other}
       end;
      % Continue is taken care of in calculate_next_index

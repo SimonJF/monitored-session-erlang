@@ -61,6 +61,7 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
       Err
   end.
 
-invite({ProtocolName, RoleName, MonitorPID}, InviteeMonitorPID, RoleName) ->
-  gen_server:call(MonitorPID, {send_delayed_invite, ProtocolName, InviteeMonitorPID, RoleName}).
+invite({ProtocolName, _RoleName, MonitorPID}, InviteeMonitorPID, InviteeRoleName) ->
+  gen_server:call(MonitorPID, {send_delayed_invite, ProtocolName,
+                               InviteeMonitorPID, InviteeRoleName}).
 

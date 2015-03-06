@@ -73,13 +73,12 @@ init([Module, UserArgs]) ->
   case MonitorProcess of
     {ok, MonitorPid} ->
       actor_type_registry:register_actor_instance(Module, MonitorPid),
-      % TODO: Must send the protocol and role here too
       UserState = Module:ssactor_init(UserArgs, MonitorPid),
       {ok, #actor_state{actor_type_name=Module,
                         monitor_pid=MonitorPid,
                         user_state=UserState}};
     Other ->
-      {error, monitor_start_failed, Other}
+      {error, {monitor_start_failed, Other}}
   end.
 
 
@@ -110,6 +109,8 @@ delegate_async(Fun, Msg, State) ->
 
 % Same for synchronous messages, but there are a couple more things we need
 % to handle, in particular re: replies
+handle_call(ssa_get_monitor_id, _From, State) ->
+  {reply, State#actor_state.monitor_pid, State};
 handle_call(Request, From, State) ->
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
@@ -173,12 +174,28 @@ terminate(Reason, State) ->
   Module:terminate(Reason, State),
   ok.
 
+
+% Gets the monitor PID to return to user code, as the user should
+% address all requests (even unmonitored ones) to the monitor, which
+% forwards the requests.
+unwrap_start_result({ok, ActorPid}) ->
+  MonitorPid = gen_server:call(ActorPid, ssa_get_monitor_id),
+  {ok, MonitorPid};
+unwrap_start_result(Other) -> Other.
+
 % Public API
+%
+
+
+
 start(ModuleName, Args, Options) ->
-  gen_server:start(ssa_gen_server, [ModuleName, Args], Options).
+  Res = gen_server:start(ssa_gen_server, [ModuleName, Args], Options),
+  unwrap_start_result(Res).
 
 start_link(ModuleName, Args, Options) ->
-  gen_server:start_link(ssa_gen_server, [ModuleName, Args], Options).
+  Res = gen_server:start_link(ssa_gen_server, [ModuleName, Args], Options),
+  unwrap_start_result(Res).
+
 
 call(ServerRef, Message) ->
   gen_server:call(ServerRef, Message).
