@@ -42,3 +42,4 @@ ssactor_handle_message(_SenderRole, Op, Types, Payload, _State, _Monitor) ->
   actor_logger:err(buyer1, "Unhandled message: (~s, ~w, ~w)", [Op, Types, Payload]),
   no_state.
 
+terminate(_, _) -> ok.

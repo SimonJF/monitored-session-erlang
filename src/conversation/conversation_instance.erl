@@ -27,20 +27,44 @@ conversation_info(Format, Args, State) ->
   log_msg(fun error_logger:info_msg/2, Format, Args, State).
 
 
+
 % Message routing.
+% Get and test endpoints for all roles.
+% Returns either {ok, [Endpoints]} if all's ok,
+% {error, role_not found, Role} if role is not in the mapping table,
+% {error, endpoint_terminated, Role} if the Role |-> Endpoint mapping
+% is stale
+get_endpoints([], _RoleMap) -> {ok, []};
+get_endpoints([Role|Roles], RoleMap) ->
+  case orddict:find(Role, RoleMap) of
+    {ok, Endpoint} ->
+      ProcessAlive = is_process_alive(Endpoint),
+      if ProcessAlive ->
+           case get_endpoints(Roles, RoleMap) of
+             {ok, Endpoints} ->
+               {ok, [Endpoint|Endpoints]};
+             Err -> Err
+           end;
+         true ->
+           {error, endpoint_terminated, Role}
+      end;
+    error ->
+      {error, role_not_found, Role}
+  end.
+
 % Lookup the destination role, and forward to its monitor.
 route_message(Msg, State) ->
   Recipients = message:message_recipients(Msg),
   RoleMap = State#conv_inst_state.role_mapping,
   % Lookup the endpoint for each recipient and deliver
-  lists:foreach(fun (Recipient) ->
-                 case orddict:find(Recipient, RoleMap) of
-                  {ok, Endpoint} ->
-                    gen_server:cast(Endpoint, {message, self(), Msg});
-                  error ->
-                    conversation_warn("Couldn't find endpoint for role ~s.",
-                                      [Recipient], State)
-                 end end, Recipients).
+  case get_endpoints(Recipients, RoleMap) of
+    {ok, Endpoints} ->
+      lists:foreach(fun(Endpoint) ->
+                      gen_server:cast(Endpoint, {message, self(), Msg})
+                    end, Endpoints),
+      {reply, ok, State};
+    Err -> {reply, Err, State}
+  end.
 
 % Add the participant to the Role |-> Endpoint map
 register_participant(RoleName, Sender, State) ->
@@ -69,13 +93,12 @@ init([ProtocolName, RoleNames]) -> {ok, fresh_state(ProtocolName, RoleNames)}.
 
 handle_call({accept_invitation, RoleName}, {Sender, _}, State) ->
   register_participant(RoleName, Sender, State);
+handle_call({outgoing_msg, Msg}, _From, State) ->
+  route_message(Msg, State);
 handle_call(Other, Sender, State) ->
   conversation_warn("Unhandled sync message ~w from ~p", [Other, Sender], State),
   {noreply, State}.
 
-handle_cast({outgoing_msg, Msg}, State) ->
-  route_message(Msg, State),
-  {noreply, State};
 handle_cast(Other, State) ->
   conversation_warn("Unhandled async message ~w.", [Other], State),
   {noreply, State}.

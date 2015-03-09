@@ -20,8 +20,15 @@ teardown() ->
   conversation_runtime_sup:teardown().
 
 send({ProtocolName, RoleName, MonitorPID}, Recipients, MessageName, Types, Payload)  ->
-  gen_server:call(MonitorPID, {send_msg, ProtocolName, RoleName, Recipients, MessageName,
-                               Types, Payload}).
+  Res = gen_server:call(MonitorPID, {send_msg, ProtocolName, RoleName, Recipients, MessageName,
+                        Types, Payload}),
+  io:format("After send.~n"),
+  case Res of
+    ok -> ok;
+    Err ->
+      io:format("Throwing error: ~p.~n", [Err]),
+      error(Err)
+  end.
 
 % Used to transition to another role.
 become({_ProtocolName, _OldRole, MonitorPID}, RoleName, Operation, Arguments) ->

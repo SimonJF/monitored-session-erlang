@@ -149,7 +149,7 @@ deliver_incoming_message(Protocol, Role, Msg, State) ->
   gen_server:cast(RecipientPID, {Protocol, Role, Msg}).
 
 deliver_outgoing_message(Msg, ConversationID) ->
-  gen_server:cast(ConversationID, {outgoing_msg, Msg}).
+  gen_server:call(ConversationID, {outgoing_msg, Msg}).
 
 % Handles an incoming message. Checks whether we're in the correct conversation,
 % then grabs the monitor, then checks / updates the monitor state.
@@ -186,17 +186,19 @@ handle_outgoing_message(CurrentProtocol, _CurrentRole, Recipients,
                                     MessageName, Types, Payload),
       MonitorRes = monitor_msg(send, MessageData, ConversationID, State),
       case MonitorRes of
-        {ok, NewState} -> {reply, ok, NewState};
-        Err -> {reply, Err, State}
+        {ok, Reply, NewState} -> {Reply, NewState};
+        Err ->
+          %io:format("Err triggered in handle_outgoing_msg: ~p~n", [Err]),
+          {Err, State}
       end;
     {Err, ok} ->
       monitor_warn("Couldn't find conversation for active protocol ~s.~n",
                    [CurrentProtocol], State),
-      {reply, Err, State};
+      {Err, State};
     {_, Err} ->
       monitor_warn("Couldn't find current role for active protocol ~s.~n",
                    [CurrentProtocol], State),
-      {reply, Err, State}
+      {Err, State}
   end.
 
 
@@ -230,10 +232,13 @@ monitor_msg(CommType, MessageData, ConversationID, State) ->
               % If we're sending, then pop it to the conversation instance process
               % If we're receiving, then delegate to user session actor code.
               case CommType of
-                send -> deliver_outgoing_message(MessageData, ConversationID);
-                recv -> deliver_incoming_message(ProtocolName, CurrentRole, MessageData, NewState)
-              end,
-              {ok, NewState};
+                send ->
+                  OutgoingRes = deliver_outgoing_message(MessageData, ConversationID),
+                  {ok, OutgoingRes, NewState};
+                recv ->
+                  deliver_incoming_message(ProtocolName, CurrentRole, MessageData, NewState),
+                  {ok, NewState}
+              end;
             {error, Err, _Monitor} ->
               monitor_warn("Monitor failed when processing message ~p (~p). Error: ~p~n",
                            [MessageData, CommType, Err], State),
@@ -268,7 +273,7 @@ handle_send_delayed_invite(ProtocolName, InviteeMonitorPid, RoleName, State) ->
       case InviteRes of
         {ok, ok} -> {reply, ok, State};
         % Found protocol, but error in invitation
-        {ok, Err} -> {reply, err, State};
+        {ok, Err} -> {reply, Err, State};
         % Couldn't find protocol
         Err -> {reply, Err, State}
       end;
@@ -284,8 +289,9 @@ handle_call({terminate_conversation, ConversationID}, _Sender, State) ->
   handle_terminate_conversation(ConversationID, State);
 handle_call({send_msg, CurrentProtocol, CurrentRole, Recipients,
              MessageName, Types, Payload}, _Sender, State) ->
-  handle_outgoing_message(CurrentProtocol, CurrentRole, Recipients,
-                          MessageName, Types, Payload, State);
+  {Reply, NewState} = handle_outgoing_message(CurrentProtocol, CurrentRole, Recipients,
+                          MessageName, Types, Payload, State),
+  {reply, Reply, NewState};
 handle_call({become, RoleName, Op, Arguments}, _Sender, State) ->
   handle_become(RoleName, Op, Arguments, State);
 handle_call({send_delayed_invite, ProtocolName, InviteeMonitorPid, RoleName},
