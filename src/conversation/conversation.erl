@@ -26,7 +26,6 @@ send({ProtocolName, RoleName, MonitorPID}, Recipients, MessageName, Types, Paylo
   case Res of
     ok -> ok;
     Err ->
-      io:format("Throwing error: ~p.~n", [Err]),
       error(Err)
   end.
 

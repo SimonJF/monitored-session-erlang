@@ -1,0 +1,7 @@
+module src.com.simonjf.scribbletest.SupervisedActors1_Actor1;
+
+local protocol SupervisedActors1 at Actor1(role Actor1,role Actor2) {
+	Hello() to Actor2;
+	Dying() from Actor2;
+	ProblematicMessage() to Actor2;
+}

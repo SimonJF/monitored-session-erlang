@@ -3,6 +3,7 @@
 	"examples/TwoBuyer/*",
 	"examples/Warehouse/*",
 	"examples/DelayedFulfilment/*",
+	"examples/SimpleSupervisor/*",
 	"examples/*",
 	"tests/monitor/*", "tests/util/*", "tests/behaviour/*"],
 					[debug_info,

@@ -297,10 +297,16 @@ handle_call({become, RoleName, Op, Arguments}, _Sender, State) ->
 handle_call({send_delayed_invite, ProtocolName, InviteeMonitorPid, RoleName},
             _Sender, State) ->
   handle_send_delayed_invite(ProtocolName, InviteeMonitorPid, RoleName, State);
-handle_call(Other, Sender, State) ->
-  monitor_warn("Received unhandled synchronous message ~p from PID ~p.",
-               [Other, Sender], State),
-  {reply, unhandled, State}.
+% Delegate directly to handle_call in monitor
+handle_call(Msg, From, State) ->
+  ActorPid = State#conv_state.actor_pid,
+  Reply = gen_server:call(ActorPid, {delegate_call, From, Msg}),
+  {reply, Reply, State}.
+
+%handle_call(Other, Sender, State) ->
+%  monitor_warn("Received unhandled synchronous message ~p from PID ~p.",
+%               [Other, Sender], State),
+%  {reply, unhandled, State}.
 
 % Module:handle_cast(Request, State) -> Result
 % Only async messages are actually data ones.
@@ -308,11 +314,15 @@ handle_call(Other, Sender, State) ->
 handle_cast({message, ConversationID, MessageData}, State) ->
   handle_incoming_message(MessageData, ConversationID, State);
 handle_cast(Other, State) ->
-  monitor_warn("Received unhandøled async message ~p.", [Other], State),
+  %monitor_warn("Received unhandled async message ~p.", [Other], State),
+  ActorPid = State#conv_state.actor_pid,
+  gen_server:cast(ActorPid, Other),
   {noreply, State}.
 
 handle_info(Info, State) ->
-  monitor_warn("Received unhandled info message ~p.", [Info], State),
+  %monitor_warn("Received unhandled info message ~p.", [Info], State),
+  ActorPid = State#conv_state.actor_pid,
+  ActorPid ! Info,
   {noreply, State}.
 
 terminate(Reason, State) ->

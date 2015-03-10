@@ -70,6 +70,7 @@ init([Module, UserArgs]) ->
                                          [self(),
                                           Module,
                                           ProtocolRoleMap], []),
+  process_flag(trap_exit, true),
   case MonitorProcess of
     {ok, MonitorPid} ->
       actor_type_registry:register_actor_instance(Module, MonitorPid),
@@ -111,6 +112,9 @@ delegate_async(Fun, Msg, State) ->
 % to handle, in particular re: replies
 handle_call(ssa_get_monitor_id, _From, State) ->
   {reply, State#actor_state.monitor_pid, State};
+handle_call({delegate_call, From, Msg}, _From, State) ->
+  % Spoof From value
+  handle_call(Msg, From, State);
 handle_call(Request, From, State) ->
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
@@ -167,11 +171,12 @@ code_change(_PreviousVersion, State, _Extra) ->
   {ok, State}.
 
 terminate(Reason, State) ->
-  actor_error("Actor terminating for reason ~p", [Reason], State),
+  actor_error("Actor terminating for reason ~p~n", [Reason], State),
   Module = State#actor_state.actor_type_name,
   MonitorPID = State#actor_state.monitor_pid,
+  UserState = State#actor_state.user_state,
   actor_type_registry:deregister_actor_instance(Module, MonitorPID),
-  Module:terminate(Reason, State),
+  Module:terminate(Reason, UserState),
   ok.
 
 
