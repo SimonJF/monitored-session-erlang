@@ -16,21 +16,23 @@ ssactor_init(_Args, Monitor) ->
   % TODO: Need the possibility to return an error from ssactor_init
   #warehouse_state{item_db=ItemDB}.
 
-restock(Monitor, ProductName, Quantity) ->
+restock(ConvKey, ProductName, Quantity) ->
   actor_logger:info(warehouse, "Purchase protocol: restocking ~s~n",
                    [ProductName]),
-  conversation:become(Monitor, "Store", restock, [ProductName, Quantity]).
+  conversation:become(ConvKey, "Store", restock, [ProductName, Quantity]).
 
 
 % Purchase protocol -- we're the seller. Customer is the buyer.
-ssactor_handle_message(SenderRole, "getStockList", _, [], State, Monitor) ->
+ssactor_handle_message("Purchase", "Seller", _CID, SenderRole,
+                       "getStockList", [], State, ConvKey) ->
   actor_logger:info(warehouse, "Purchase protocol: stock list requested~n",
                     []),
   % Send back the list of what we have in stock
   Products = orddict:fetch_keys(State#warehouse_state.item_db),
-  conversation:send(Monitor, [SenderRole], "stockList", ["StringList"], [Products]),
+  conversation:send(ConvKey, [SenderRole], "stockList", ["StringList"], [Products]),
   State;
-ssactor_handle_message(SenderRole, "buy", _, [ProductName], State, Monitor) ->
+ssactor_handle_message("Purchase", "Seller", _CID, SenderRole,
+                       "buy", [ProductName], State, Monitor) ->
   actor_logger:info(warehouse, "Purchase protocol: purchase of ~s requested ~n",
                     [ProductName]),
 
@@ -58,9 +60,10 @@ ssactor_handle_message(SenderRole, "buy", _, [ProductName], State, Monitor) ->
       conversation:send(Monitor, "error", [SenderRole], ["String"], ["Item not sold by this warehouse."]),
       State
   end;
-ssactor_handle_message(_SenderRole, "quit", _, _, State, _) -> State;
-% StoreLoad protocol, TODO: pass protocol as a parameter to ssactor_handle_message?
-ssactor_handle_message("Dealer", "put", _, [ProductName, Quantity], State, _Monitor) ->
+ssactor_handle_message("StoreLoad", "Store", _CID, _SenderRole, "quit", _,
+                       State, _) -> State;
+ssactor_handle_message("StoreLoad", "Dealer", _CID, _SenderRole, "put",
+                       [ProductName, Quantity], State, _Monitor) ->
   ItemDB = get_item_db(State),
   NewDB = case orddict:find(ProductName, ItemDB) of
     {ok, StockNumber} ->
@@ -71,13 +74,14 @@ ssactor_handle_message("Dealer", "put", _, [ProductName, Quantity], State, _Moni
   update_item_db(State, NewDB);
 
 % Dealer's accepted that we've quit. Nothing doing.
-ssactor_handle_message("Store", "acc", _, _, _, State) -> State.
+ssactor_handle_message("StoreLoad", "Store", _CID, _SenderRole,
+                       "acc", _, _, State) -> State.
 
 
 % ssactor_become: Rolename, Operation, Parameters
-ssactor_become("Store", restock, [ItemName, Quantity], Monitor, State) ->
+ssactor_become("Store", restock, [ItemName, Quantity], ConvKey, State) ->
   actor_logger:info(warehouse, "StoreLoad protocol: sending restock request", []),
-  conversation:send(Monitor, ["Dealer"], "request", ["String", "Integer"], [ItemName, Quantity]),
+  conversation:send(ConvKey, ["Dealer"], "request", ["String", "Integer"], [ItemName, Quantity]),
   State.
 % StoreLoad protocol
 %ssactor_handle_message(SenderRole, "", ) -> ().

@@ -13,13 +13,26 @@ start_link(Args) ->
 % Find the actors which are involved in the protocol, and devise a mapping
 % from roles to actor types.
 
+% Helper function to abstract around the irritating pattern of adding to a list
+% in an orddict which may not be there
+orddict_add(Key, Val, Dict) ->
+  case orddict:find(Key, Dict) of
+    {ok, List} -> orddict:store(Key, [Val|List], Dict);
+    error -> orddict:store(Key, [Val], Dict)
+  end.
+
+add_actor_to_map(ActorModuleName, RoleNames, Dict) ->
+  lists:foldl(fun(RoleName, RunningDict) ->
+                  orddict_add(RoleName, ActorModuleName, RunningDict) end,
+              Dict, RoleNames).
+
 generate_role_actor_map(ProtocolName, Config) ->
-  lists:foldl(fun({ActorModuleName, _ActorName, ProtocolMap}, Dict) ->
+  lists:foldl(fun({ActorModuleName, ProtocolMap}, Dict) ->
                   FindRes = lists:keyfind(ProtocolName, 1, ProtocolMap),
                   case FindRes of
-                    {ProtocolName, RoleName} ->
+                    {ProtocolName, RoleNames} ->
                       % Great, we've found it -- add to the dict
-                      orddict:store(RoleName, ActorModuleName, Dict);
+                      add_actor_to_map(ActorModuleName, RoleNames, Dict);
                     false ->
                       error_logger:warning_msg("Could not find protocol ~s in protocol map " ++
                                                 "for actor ~p.~n",

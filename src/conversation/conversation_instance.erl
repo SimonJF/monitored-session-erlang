@@ -42,7 +42,7 @@ get_endpoints([Role|Roles], RoleMap) ->
       if ProcessAlive ->
            case get_endpoints(Roles, RoleMap) of
              {ok, Endpoints} ->
-               {ok, [Endpoint|Endpoints]};
+               {ok, [{Role, Endpoint}|Endpoints]};
              Err -> Err
            end;
          true ->
@@ -53,14 +53,17 @@ get_endpoints([Role|Roles], RoleMap) ->
   end.
 
 % Lookup the destination role, and forward to its monitor.
-route_message(Msg, State) ->
+route_message(ProtocolName, RoleName, Msg, State) ->
+  io:format("Message data: ~p~n", [Msg]),
   Recipients = message:message_recipients(Msg),
   RoleMap = State#conv_inst_state.role_mapping,
   % Lookup the endpoint for each recipient and deliver
   case get_endpoints(Recipients, RoleMap) of
     {ok, Endpoints} ->
-      lists:foreach(fun(Endpoint) ->
-                      gen_server:cast(Endpoint, {message, self(), Msg})
+      lists:foreach(fun({DestRole, Endpoint}) ->
+                      gen_server:cast(Endpoint,
+                                      {message, ProtocolName, DestRole, self(),
+                                       Msg})
                     end, Endpoints),
       {reply, ok, State};
     Err -> {reply, Err, State}
@@ -93,8 +96,8 @@ init([ProtocolName, RoleNames]) -> {ok, fresh_state(ProtocolName, RoleNames)}.
 
 handle_call({accept_invitation, RoleName}, {Sender, _}, State) ->
   register_participant(RoleName, Sender, State);
-handle_call({outgoing_msg, Msg}, _From, State) ->
-  route_message(Msg, State);
+handle_call({outgoing_msg, ProtocolName, RoleName, Msg}, _From, State) ->
+  route_message(ProtocolName, RoleName, Msg, State);
 handle_call(Other, Sender, State) ->
   conversation_warn("Unhandled sync message ~w from ~p", [Other, Sender], State),
   {noreply, State}.

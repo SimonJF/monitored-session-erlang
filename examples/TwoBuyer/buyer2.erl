@@ -14,10 +14,10 @@
 
 ssactor_init(_Args, _Monitor) -> no_state. % We don't need no state round these parts
 
-ssactor_handle_message(SenderRole, "quote", _, [QuoteInt], _State, _Monitor) ->
+ssactor_handle_message("TwoBuyers", "B", _CID, SenderRole, "quote", [QuoteInt], _State, _Monitor) ->
   actor_logger:info(buyer2, "Received quote of ~p from ~s", [QuoteInt, SenderRole]),
   no_state;
-ssactor_handle_message(SenderRole, "share", _, [Share], _State, Monitor) ->
+ssactor_handle_message("TwoBuyers", "B", _CID, SenderRole, "share", [Share], _State, Monitor) ->
   actor_logger:info(buyer2, "Received share quote (~p) from ~s", [Share, SenderRole]),
   if Share >= ?PRICE_THRESHOLD ->
        % Nah, we aint paying that
@@ -31,10 +31,10 @@ ssactor_handle_message(SenderRole, "share", _, [Share], _State, Monitor) ->
                          ["String"], ["Informatics Forum"])
   end,
   no_state;
-ssactor_handle_message(SenderRole, "date", _, [DeliveryDate], _State, _Monitor) ->
+ssactor_handle_message("TwoBuyers", "B", _CID, SenderRole, "date", [DeliveryDate], _State, _Monitor) ->
   actor_logger:info(buyer2, "Received delivery date of ~s from ~s", [DeliveryDate, SenderRole]),
   no_state;
-ssactor_handle_message(_SenderRole, Op, Types, Payload, _State, _Monitor) ->
-  actor_logger:err(buyer2, "Unhandled message: (~s, ~w, ~w)", [Op, Types, Payload]),
+ssactor_handle_message("TwoBuyers", "B", _CID, _SenderRole, Op, Payload, _State, _Monitor) ->
+  actor_logger:err(buyer2, "Unhandled message: (~s, ~w)", [Op, Payload]),
   no_state.
 

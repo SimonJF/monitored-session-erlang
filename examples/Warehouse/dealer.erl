@@ -7,12 +7,15 @@ ssactor_init(_Args, _Monitor) ->
   no_state.
 
 % Receiving the stock list
-ssactor_handle_message(_SenderRole, "request", _, [Item, Quantity], State, Monitor) ->
+% P
+ssactor_handle_message("StoreLoad", "Dealer", _CID,
+                       _SenderRole, "request", [Item, Quantity], State, ConvKey) ->
   actor_logger:info(dealer, "Received restock request from seller: ~p~n", [Item]),
-  conversation:send(Monitor, ["Store"], "put", ["String", "Integer"],
+  conversation:send(ConvKey, ["Store"], "put", ["String", "Integer"],
                     [Item, Quantity]),
   State;
-ssactor_handle_message(_SenderRole, "quit", _, _, State, Monitor) ->
+ssactor_handle_message("StoreLoad", "Dealer", _CID,
+                       _SenderRole, "quit", _, State, Monitor) ->
   actor_logger:info(dealer, "Received quit instruction from store. ~p~n", []),
   conversation:send(Monitor, ["Store"], "acc", [], []),
   State.

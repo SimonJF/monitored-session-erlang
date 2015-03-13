@@ -15,21 +15,21 @@
 
 ssactor_init(_Args, _Monitor) -> no_state. % We don't need no state round these parts
 
-ssactor_handle_message(SenderRole, "title", _, [Title], _State, Monitor) ->
-  actor_logger:info(seller, "Received title ~s from ~s", [Title, SenderRole]),
+ssactor_handle_message("TwoBuyers", "S", _CID, SenderRole, "title", [Title], _State, Monitor) ->
+  actor_logger:info(seller, "Received title ~s from ~s", [Title, "TwoBuyers", "S", _CID, SenderRole]),
   conversation:send(Monitor, ["A", "B"], "quote", ["Integer"], [?PRICE]),
   no_state;
-ssactor_handle_message(SenderRole, "accept", _, [Address], _State, Monitor) ->
+ssactor_handle_message("TwoBuyers", "S", _CID, SenderRole, "accept", [Address], _State, Monitor) ->
   actor_logger:info(seller, "~s accepted quote; received address ~s", [SenderRole, Address]),
   conversation:send(Monitor, ["B"], "date", ["String"], [?DELIVERY_DATE]),
   no_state;
-ssactor_handle_message(SenderRole, "retry", _, _, _State, _Monitor) ->
-  actor_logger:info(seller, "~s wants to retry", [SenderRole]),
+ssactor_handle_message("TwoBuyers", "S", _CID, SenderRole, "retry", _, _State, _Monitor) ->
+  actor_logger:info(seller, "~s wants to retry", ["TwoBuyers", SenderRole]),
   no_state;
-ssactor_handle_message(SenderRole, "quit", _, _, _State, _Monitor) ->
-  actor_logger:info(seller, "~s wants to quit", [SenderRole]),
+ssactor_handle_message("TwoBuyers", "S", _CID, SenderRole, "quit", _, _State, _Monitor) ->
+  actor_logger:info(seller, "~s wants to quit", ["TwoBuyers", SenderRole]),
   no_state;
-ssactor_handle_message(_SenderRole, Op, Types, Payload, _State, _Monitor) ->
-  actor_logger:err(seller, "Unhandled message: (~s, ~w, ~w)", [Op, Types, Payload]),
+ssactor_handle_message("TwoBuyers", "S", _CID, _SenderRole, Op, Payload, _State, _Monitor) ->
+  actor_logger:err(seller, "Unhandled message: (~s, ~w)", [Op, Payload]),
   no_state.
 

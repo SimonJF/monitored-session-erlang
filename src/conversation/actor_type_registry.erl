@@ -21,11 +21,12 @@ spawn_child(ActorModuleName, ProtocolRoleMap, ProcDict) ->
       % later on.
       error_logger:error_msg("Error starting process for actor type ~p: ~p~n",
                              [ActorModuleName, Error]),
+      error(starting_proc_failed),
       ProcDict
   end.
 
 spawn_children(Config) ->
-  lists:foldl(fun({ActorModuleName, _ActorName, ProtocolRoleMap}, ProcDict) ->
+  lists:foldl(fun({ActorModuleName, ProtocolRoleMap}, ProcDict) ->
                   spawn_child(ActorModuleName, ProtocolRoleMap, ProcDict) end,
               orddict:new(),
               Config).
@@ -33,6 +34,8 @@ spawn_children(Config) ->
 
 % Gets the PID for an actor type process with the given name
 get_actor_type_pid(ActorTypeName, ActorTypeRegistry) ->
+  io:format("ActorTypeName: ~p, ActorTypeRegistry: ~p~n", [ActorTypeName,
+                                                           orddict:to_list(ActorTypeRegistry)]),
   orddict:find(ActorTypeName, ActorTypeRegistry).
 
 
@@ -42,7 +45,9 @@ actor_type_call(ActorTypeName, Message, ActorTypeRegistry) ->
   case get_actor_type_pid(ActorTypeName, ActorTypeRegistry) of
     {ok, ActorTypePid} ->
       gen_server:call(ActorTypePid, Message);
-    _Other -> {error, actor_type_not_registered}
+    Other ->
+      io:format("Other in actor_type_call: ~p~n", [Other]),
+      {error, actor_type_not_registered}
   end.
 
 

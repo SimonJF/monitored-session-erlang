@@ -33,7 +33,7 @@
 %   NewState
 behaviour_info(callbacks) ->
     [{ssactor_init,2},
-     {ssactor_handle_message, 6},
+     {ssactor_handle_message, 7},
      {ssactor_become, 5},
      {handle_call, 3},
      {handle_cast, 3},
@@ -142,15 +142,19 @@ handle_call(Request, From, State) ->
 
 % Handle incoming user messages. These have been checked by the monitor to
 % ensure that they conform to the MPST.
-handle_cast(Msg = {Protocol, Role, {message, _, Sender, _, Op, Types, Payload}}, State) ->
-  actor_info("Processing message ~p", [Msg], State),
+handle_cast({ssa_msg, Protocol, Role, ConversationID, MsgData}, State) ->
+                   % {message, _, Sender, _, Op, Types, Payload}}, State) ->
+  actor_info("Processing message ~p", [MsgData], State),
+  Sender = message:message_sender(MsgData),
+  Op = message:message_name(MsgData),
+  Payload = message:message_payload(MsgData),
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
   % TODO: ssactor_handle_message currently just returns a new state.
   % Should we have some more complex callback here instead?
-  NewUserState = Module:ssactor_handle_message(Sender, Op, Types, Payload,
-                                           UserState,
-                                           {Protocol, Role, State#actor_state.monitor_pid}),
+  NewUserState = Module:ssactor_handle_message(
+                   Protocol, Role, ConversationID, Sender, Op, Payload, UserState,
+                   {Protocol, Role, ConversationID, State#actor_state.monitor_pid}),
   {noreply, State#actor_state{user_state=NewUserState}};
 handle_cast(_Msg = {Protocol, Role, {become, Operation, Arguments}}, State) ->
   Module = State#actor_state.actor_type_name,

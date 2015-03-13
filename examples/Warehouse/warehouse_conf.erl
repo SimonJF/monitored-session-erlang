@@ -2,6 +2,6 @@
 -export([config/0]).
 
 config() ->
-  [{dealer, "Dealer", [{"StoreLoad", "Dealer"}]},
-   {warehouse, "Warehouse", [{"StoreLoad", "Store"}, {"Purchase", "Seller"}]},
-   {customer, "Customer", [{"Purchase", "Buyer"}]}].
+  [{dealer, [{"StoreLoad", ["Dealer"]}]},
+   {warehouse, [{"StoreLoad", ["Store"]}, {"Purchase", ["Seller"]}]},
+   {customer, [{"Purchase", ["Buyer"]}]}].

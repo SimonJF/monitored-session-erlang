@@ -12,6 +12,6 @@
 % And the {Protocol, Role} list is a list of Protocol |-> Role mappings.
 
 config() ->
-  [{buyer1, "Buyer1", [{"TwoBuyers", "A"}]},
-   {buyer2, "Buyer2", [{"TwoBuyers", "B"}]},
-   {seller, "Seller", [{"TwoBuyers", "S"}]}].
+  [{buyer1, [{"TwoBuyers", ["A"]}]},
+   {buyer2, [{"TwoBuyers", ["B"]}]},
+   {seller, [{"TwoBuyers", ["S"]}]}].

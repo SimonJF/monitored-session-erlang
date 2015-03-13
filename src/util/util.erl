@@ -18,3 +18,6 @@ string_contains(String, Segment) ->
 prefix_dir_name("", Filename) -> Filename;
 prefix_dir_name(DirName, Filename) ->
   filename:join(DirName, Filename).
+
+list_contains(Key, List) ->
+  lists:any(fun(X) -> X == Key end, List).

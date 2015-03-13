@@ -94,7 +94,16 @@ invite_actor_role(RoleName, ConversationID, State) ->
   io:format("Trying to find role ~s in Role->Actor map for protocol ~p~n",
             [RoleName, ProtocolName]),
   case ActorTypeRes of
-    {ok, ActorType} ->
+    % Okay, so, explanation for this I guess.
+    % We really want to lift the restriction that only one type of actor
+    % can play a particular role in the protocol, as it seems a bit inflexible.
+    % For example, we could have a customer or a warehouse being the Buyer in
+    % the Purchase protocol.
+    % Really, Neykova & Yoshida's actor / role discovery protocol makes sense
+    % only when there's one actor type per protocol-role. So we take the first,
+    % assuming that if we really need roles to be played by multiple actor types,
+    % the roles are either initial, transient, or explicitly invited upon initiation.
+    {ok, [ActorType|_XS]} ->
       actor_type_registry:invite_actor_to_role(ActorType,
                                                ProtocolName,
                                                RoleName,

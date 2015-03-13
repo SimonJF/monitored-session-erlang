@@ -2,21 +2,22 @@
 
 -behaviour(gen_server).
 -compile(export_all).
-
+-import(util, [list_contains/2]).
 -record(conv_state, {actor_pid, % PID of the attached actor
                      actor_type_name, % Name of the attached actor type
-                     active_protocols, % Protocols which we're currently involved in
-                     protocol_role_map, % Roles for each protocol
-                     monitors}). % Monitors for each role we play in each protocol
+                     active_protocols, % [{ProtocolName, RoleName, ConversationID}]
+                     protocol_role_map, % Protocol Name |-> [Role]
+                     clean_monitors, % Clean monitors: (ProtocolName, RoleName) |-> Monitor
+                     monitors % (ProtocolName, RoleName, ConversationID) |-> Monitor
+                    }).
+% New monitor state
+% Say we can be involved in multiple protocols, and multiple roles within each
+% protocol.
+% In order to do this, we need each message to carry the conversation ID.
+% active_protocols then becomes a map from protocol name |-> roles we're currently in
+% protocol_role_map becomes a map from protocol name |-> roles we can take part in
+% monitors becomes a map from (ProtocolName, RoleName, ConversationID) |-> Monitor
 
-% Monitor State
-% Actor PID (as before)
-% Actor type name (as before)
-% Protocol <-|-> Conversation ID mapping (as we can be involved in mult protocols)
-% Protocol |-> Role mapping (where Role is the role we can play in a protocol)
-% Monitors (Protocol |-> Monitor Instance)
-% Active protocol
-%
 % New workflow:
 % Always handle conversation invitation messages.
 %  - Accept if we're not involved in a protocol of that type.
@@ -25,16 +26,10 @@
 % Always handle conversation termination messages, removing from active
 % conversation list.
 %
-% What to do when we get a message for a role that's not currently active?
-% In the paper, it's scheduled co-operatively, meaning only one can be active at
-% once. I don't know why though. As a temp thing, we could just ignore them, and
-% mark it as a fixme, at least until we get the very basic scaffolding going.
-%
 % New architecture for actor_monitor: use a gen_server instead of a gen_fsm, as
 % we no longer have to differentiate between the idle / setup / working states.
 % As soon as we respond to the invitation message, we can partake in interactions
 % for the registered conversation ID.
-
 
 log_msg(Func, Format, Args, State) ->
   InfoStr = "Actor ~p, actor PID ~p, monitor instance ~p.",
@@ -57,33 +52,44 @@ monitor_info(Format, Args, State) ->
 fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap) ->
   #conv_state{actor_pid=ActorPid,
               actor_type_name=ActorTypeName, % Name of the attached actor type
-              active_protocols=bidirectional_map:new(), % Protocols which we're currently involved in
+              active_protocols=orddict:new(),
               protocol_role_map=ProtocolRoleMap, % Roles for each protocol
-              monitors=orddict:new()}. % Monitors for each role we play in each protocol
+              monitors=orddict:new(),
+              clean_monitors=orddict:new()
+             }.
 
 load_monitors([], MonitorDict, _) ->
   MonitorDict;
-load_monitors([{ProtocolName, RoleName}|XS], MonitorDict, State) ->
-  MonitorRes = protocol_registry:get_monitor(ProtocolName, RoleName),
+load_monitors([{ProtocolName, RoleNames}|XS], MonitorDict, State) ->
+  NewMonitorDict = load_protocol_monitors(ProtocolName, RoleNames,
+                                          MonitorDict, State),
+  load_monitors(XS, NewMonitorDict, State).
+
+load_protocol_monitors(_ProtocolName, [], MonitorDict, _State) -> MonitorDict;
+load_protocol_monitors(ProtocolName, [Role|Roles], MonitorDict, State) ->
+  MonitorRes = protocol_registry:get_monitor(ProtocolName, Role),
   case MonitorRes of
-    {ok, {ok, Monitor}} -> NewDict = orddict:store(ProtocolName, Monitor, MonitorDict),
-                      load_monitors(XS, NewDict, State);
+    {ok, {ok, Monitor}} ->
+      NewDict = orddict:store({ProtocolName, Role}, Monitor, MonitorDict),
+      load_protocol_monitors(ProtocolName, Roles, NewDict, State);
     Err ->
       monitor_warn("Could not load monitor for protocol ~s, role ~s: ~p ",
-                   [ProtocolName, RoleName, Err], State),
-      load_monitors(XS, MonitorDict, State)
+                   [ProtocolName, Role, Err], State),
+      load_protocol_monitors(ProtocolName, Roles, MonitorDict, State)
   end.
+
+
 
 % Initialises the basic monitor state with some default values.
 init([ActorPid, ActorTypeName, ProtocolRoleMap]) ->
   % Firstly, create a fresh state with all of the information we've been given
-  BidirectionalPRM = bidirectional_map:from_orddict(ProtocolRoleMap),
-  State = fresh_state(ActorPid, ActorTypeName, BidirectionalPRM),
+  State = fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap),
   % Next, we load the monitors.
   MonitorDict = load_monitors(orddict:to_list(ProtocolRoleMap),
                               orddict:new(),
                               State),
-  {ok, State#conv_state{monitors=MonitorDict}}.
+  io:format("Clean monitors: ~p~n", [orddict:to_list(MonitorDict)]),
+  {ok, State#conv_state{clean_monitors=MonitorDict}}.
 
 
 
@@ -97,20 +103,42 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
   % Firstly, check to see we're registered for the role
   ProtocolRoleMap = State#conv_state.protocol_role_map,
   ActiveProtocols = State#conv_state.active_protocols,
-  RoleFindRes = bidirectional_map:find_left(ProtocolName, ProtocolRoleMap),
-  AlreadyFulfilled = bidirectional_map:contains_left(ProtocolName, ActiveProtocols),
-  case {RoleFindRes, AlreadyFulfilled} of
-    {_, true} -> {error, already_fulfilled};
-    {{ok, RoleRes}, false} when RoleRes == RoleName ->
+  Monitors = State#conv_state.monitors,
+  FreshMonitors = State#conv_state.clean_monitors,
+  % First, check whether we can fulfil the role (ie it's contained in the PRM)
+  io:format("PRM: ~p~n", [ProtocolRoleMap]),
+  RoleFindRes =
+    case orddict:find(ProtocolName, ProtocolRoleMap) of
+      {ok, ProtocolRoles} ->
+        list_contains(RoleName, ProtocolRoles);
+      error -> false
+    end,
+
+  FreshMonitorRes =
+    orddict:find({ProtocolName, RoleName}, FreshMonitors),
+
+  % Next, check whether we've already fulfilled the role (that is, it's in
+  % the active_protocols map
+  AlreadyFulfilled =
+    lists:any(fun(ActiveTuple) ->
+                  ActiveTuple == {ProtocolName, RoleName, ConversationID} end,
+              ActiveProtocols),
+
+    case {RoleFindRes, AlreadyFulfilled, FreshMonitorRes} of
+    {true, false, {ok, FreshMonitor}} ->
       % We can fulfil it!
-      NewActiveProtocols = bidirectional_map:store(ProtocolName, ConversationID, ActiveProtocols),
+      NewActiveProtocols = orddict:append(ProtocolName, RoleName, ActiveProtocols),
+      NewMonitors = orddict:store({ProtocolName, RoleName, ConversationID},
+                                  FreshMonitor, Monitors),
       % TODO: Try-Catch round this, in case the conversation goes away
       Res = gen_server:call(ConversationID, {accept_invitation, RoleName}),
       case Res of
-        % Also set the role as active.
-        ok -> {ok, State#conv_state{active_protocols=NewActiveProtocols}};
+        % Now, add the <Protocol, Role, CID> |-> Monitor mapping
+        ok -> {ok, State#conv_state{active_protocols=NewActiveProtocols,
+                                    monitors=NewMonitors}};
         {error, Err} -> {error, Err}
       end;
+    {_, true, _} -> {error, already_fulfilled};
     _Other -> {error, cannot_fulfil}
   end.
 
@@ -137,148 +165,119 @@ handle_invitation(ProtocolName, RoleName, ConversationID, State) ->
 % Handle termination of a conversation -- remove from the conversation
 handle_terminate_conversation(ConversationID, State) ->
   ActiveProtocols = State#conv_state.active_protocols,
-  NewActiveProtocols = bidirectional_map:remove_right(ConversationID, ActiveProtocols),
+  NewActiveProtocols = lists:filter(fun({_,_, CID}) -> CID =/= ConversationID end,
+                                    ActiveProtocols),
   NewState = State#conv_state{active_protocols=NewActiveProtocols},
   monitor_info("Exiting conversation ~p.~n", [ConversationID], State),
   {reply, ok, NewState}.
 
 
 % Here, we deliver the message to the attached actor (which is a gen_server).
-deliver_incoming_message(Protocol, Role, Msg, State) ->
+deliver_incoming_message(Protocol, Role, ConvID, Msg, State) ->
   RecipientPID = State#conv_state.actor_pid,
-  gen_server:cast(RecipientPID, {Protocol, Role, Msg}).
+  gen_server:cast(RecipientPID, {ssa_msg, Protocol, Role, ConvID, Msg}).
 
-deliver_outgoing_message(Msg, ConversationID) ->
-  gen_server:call(ConversationID, {outgoing_msg, Msg}).
+deliver_outgoing_message(Msg, ProtocolName, RoleName, ConversationID) ->
+  gen_server:call(ConversationID, {outgoing_msg, ProtocolName, RoleName, Msg}).
 
 % Handles an incoming message. Checks whether we're in the correct conversation,
 % then grabs the monitor, then checks / updates the monitor state.
-handle_incoming_message(MessageData, ConversationID, State) ->
+handle_incoming_message(MessageData, ProtocolName, RoleName, ConversationID,
+                        State) ->
   monitor_info("Handling incoming message ~p", [MessageData], State),
-  Res = monitor_msg(recv, MessageData, ConversationID, State),
+  Res = monitor_msg(recv, MessageData, ProtocolName, RoleName, ConversationID, State),
   case Res of
     {ok, NewState} -> {noreply, NewState};
     _Err -> {noreply, State} % assuming the error has been logged already
   end.
 
-handle_become(RoleName, Operation, Arguments, State) ->
+handle_become(ProtocolName, RoleName, ConversationID, Operation, Arguments, State) ->
   RecipientPID = State#conv_state.actor_pid,
   ProtocolRoleMap = State#conv_state.protocol_role_map,
-  ProtocolRes = bidirectional_map:find_right(RoleName, ProtocolRoleMap),
-  case ProtocolRes of
-    {ok, ProtocolName} ->
+  % TODO: It's not going to be the same conversation ID. How do we disambiguate?
+  RoleOk = list_contains({ProtocolName, RoleName, ConversationID}, ProtocolRoleMap),
+  if RoleOk ->
       gen_server:cast(RecipientPID, {ProtocolName, RoleName, {become, Operation, Arguments}}),
       {reply, ok, State};
-    error -> {reply, error, bad_role}
+     not RoleOk ->
+       {reply, error, bad_role}
   end.
 
-
-handle_outgoing_message(CurrentProtocol, _CurrentRole, Recipients,
+handle_outgoing_message(CurrentProtocol, CurrentRole, ConversationID, Recipients,
                         MessageName, Types, Payload, State) ->
-  % Firstly, we need to get the conversation ID, based on the current role
-  ProtocolRoleMap = State#conv_state.protocol_role_map,
-  ActiveProtocols = State#conv_state.active_protocols,
-  RoleRes = bidirectional_map:find_left(CurrentProtocol, ProtocolRoleMap),
-  ConversationIDRes = bidirectional_map:find_left(CurrentProtocol, ActiveProtocols),
-  case {ConversationIDRes, RoleRes} of
-    {{ok, ConversationID}, {ok, RoleName}} ->
-      MessageData = message:message(make_ref(), RoleName, Recipients,
-                                    MessageName, Types, Payload),
-      MonitorRes = monitor_msg(send, MessageData, ConversationID, State),
-      case MonitorRes of
-        {ok, Reply, NewState} -> {Reply, NewState};
-        Err ->
-          %io:format("Err triggered in handle_outgoing_msg: ~p~n", [Err]),
-          {Err, State}
-      end;
-    {Err, ok} ->
-      monitor_warn("Couldn't find conversation for active protocol ~s.~n",
-                   [CurrentProtocol], State),
-      {Err, State};
-    {_, Err} ->
-      monitor_warn("Couldn't find current role for active protocol ~s.~n",
-                   [CurrentProtocol], State),
-      {Err, State}
+  % Construct a message instance, send to the monitor, and check the result
+  MessageData = message:message(make_ref(), CurrentRole, Recipients,
+                                MessageName, Types, Payload),
+  MonitorRes = monitor_msg(send, MessageData, CurrentProtocol, CurrentRole,
+                           ConversationID, State),
+  case MonitorRes of
+      {ok, Reply, NewState} -> {Reply, NewState};
+      Err ->
+        %io:format("Err triggered in handle_outgoing_msg: ~p~n", [Err]),
+        {Err, State}
   end.
 
-
-monitor_msg(CommType, MessageData, ConversationID, State) ->
+monitor_msg(CommType, MessageData, ProtocolName, RoleName, ConversationID, State) ->
   Monitors = State#conv_state.monitors,
-  % Get the protocol name for the conversation
-  ActiveProtocols = State#conv_state.active_protocols,
-  ProtocolRoleMap = State#conv_state.protocol_role_map,
-  ConversationProtocolResult = bidirectional_map:find_right(ConversationID, ActiveProtocols),
+  MonitorRes = orddict:find({ProtocolName, RoleName, ConversationID},
+                            Monitors),
   MonitorFunction = case CommType of
                       send -> fun monitor:send/2;
                       recv -> fun monitor:recv/2
                     end,
-  case ConversationProtocolResult of
-    {ok, ProtocolName} ->
-      % Set the current protocol, so that it can be used when sending
-      % messages later on.
-      CurrentRole = bidirectional_map:fetch_left(ProtocolName, ProtocolRoleMap),
-      % Find the monitor instance for the current role
-      MonitorInstance = orddict:find(ProtocolName, Monitors),
-      case MonitorInstance of
-        {ok, Monitor} ->
-          MonitorResult = MonitorFunction(MessageData, Monitor),
-          case MonitorResult of
-            {ok, NewMonitorInstance} ->
-              NewMonitors = orddict:store(ProtocolName,
-                                          NewMonitorInstance,
-                                          Monitors),
-              NewState = State#conv_state{monitors=NewMonitors},
-              % Do delegation stuff here
-              % If we're sending, then pop it to the conversation instance process
-              % If we're receiving, then delegate to user session actor code.
-              case CommType of
-                send ->
-                  OutgoingRes = deliver_outgoing_message(MessageData, ConversationID),
-                  {ok, OutgoingRes, NewState};
-                recv ->
-                  deliver_incoming_message(ProtocolName, CurrentRole, MessageData, NewState),
-                  {ok, NewState}
-              end;
-            {error, Err, _Monitor} ->
-              monitor_warn("Monitor failed when processing message ~p (~p). Error: ~p~n",
-                           [MessageData, CommType, Err], State),
-              {error, Err}
+  case MonitorRes of
+    {ok, Monitor} ->
+      MonitorResult = MonitorFunction(MessageData, Monitor),
+      case MonitorResult of
+        {ok, NewMonitorInstance} ->
+          NewMonitors = orddict:store({ProtocolName, RoleName, ConversationID},
+                                      NewMonitorInstance,
+                                      Monitors),
+          NewState = State#conv_state{monitors=NewMonitors},
+          % Do delegation stuff here
+          % If we're sending, then pop it to the conversation instance process
+          % If we're receiving, then delegate to user session actor code.
+          case CommType of
+            send ->
+              OutgoingRes = deliver_outgoing_message(MessageData, ProtocolName,
+                                                     RoleName, ConversationID),
+              {ok, OutgoingRes, NewState};
+            recv ->
+              deliver_incoming_message(ProtocolName, RoleName, ConversationID,
+                                       MessageData, NewState),
+              {ok, NewState}
           end;
-        error ->
-          monitor_warn("Could not find monitor for role ~s. Monitors: ~p.~n", [CurrentRole,
-                                                                              orddict:to_list(Monitors)], State),
-          {error, bad_monitor}
+        {error, Err, _Monitor} ->
+          monitor_warn("Monitor failed when processing message ~p (~p). Error: ~p~n",
+                       [MessageData, CommType, Err], State),
+          {error, Err}
       end;
     error ->
-      monitor_error("Could not find protocol for conversation ID ~p.",
-                    [ConversationID], State),
-      {error, bad_protocol}
+      monitor_warn("Could not find monitor for PRC <~s, ~s, ~p>. Monitors: ~p.~n",
+                   [ProtocolName, RoleName, ConversationID,
+                    orddict:to_list(Monitors)], State),
+      {error, bad_monitor}
   end.
 
-
-handle_send_delayed_invite(ProtocolName, InviteeMonitorPid, RoleName, State) ->
-  ActiveProtocols = State#conv_state.active_protocols,
-  ConversationIDRes = bidirectional_map:find_left(ProtocolName, ActiveProtocols),
-  case ConversationIDRes of
-    {ok, ConversationID} ->
-      % TODO: Adding the lookup step in actor_monitor as opposed to having
-      % ConversationID as part of the ConvKey means we can't invite ourselves
-      % to the conversation (deadlock due to synchronous calls).
-      % Not a problem at the moment as we can only perform one role per protocol,
-      % but might be worth revisiting later on.
-      InviteRes = protocol_registry:invite_actor_direct(ProtocolName,
-                                                        ConversationID,
-                                                        RoleName,
-                                                        InviteeMonitorPid),
-      case InviteRes of
-        {ok, ok} -> {reply, ok, State};
-        % Found protocol, but error in invitation
-        {ok, Err} -> {reply, Err, State};
-        % Couldn't find protocol
-        Err -> {reply, Err, State}
-      end;
-    error -> {error, not_in_conversation}
-  end.
+handle_send_delayed_invite(ProtocolName, RoleName, ConversationID, InviteeMonitorPid,
+                           State) ->
+    % TODO maybe, check if in conversation first
+    % TODO: Adding the lookup step in actor_monitor as opposed to having
+    % ConversationID as part of the ConvKey means we can't invite ourselves
+    % to the conversation (deadlock due to synchronous calls).
+    % Not a problem at the moment as we can only perform one role per protocol,
+    % but might be worth revisiting later on.
+    InviteRes = protocol_registry:invite_actor_direct(ProtocolName,
+                                                      ConversationID,
+                                                      RoleName,
+                                                      InviteeMonitorPid),
+    case InviteRes of
+      {ok, ok} -> {reply, ok, State};
+      % Found protocol, but error in invitation
+      {ok, Err} -> {reply, Err, State};
+      % Couldn't find protocol
+      Err -> {reply, Err, State}
+    end.
 
 % Synchronous messages:
 %  * Invitation
@@ -287,16 +286,18 @@ handle_call({invitation, ProtocolName, RoleName, ConversationID}, _Sender, State
   handle_invitation(ProtocolName, RoleName, ConversationID, State);
 handle_call({terminate_conversation, ConversationID}, _Sender, State) ->
   handle_terminate_conversation(ConversationID, State);
-handle_call({send_msg, CurrentProtocol, CurrentRole, Recipients,
+handle_call({send_msg, CurrentProtocol, CurrentRole, ConversationID, Recipients,
              MessageName, Types, Payload}, _Sender, State) ->
-  {Reply, NewState} = handle_outgoing_message(CurrentProtocol, CurrentRole, Recipients,
-                          MessageName, Types, Payload, State),
+  {Reply, NewState} =
+    handle_outgoing_message(CurrentProtocol, CurrentRole, ConversationID, Recipients,
+                            MessageName, Types, Payload, State),
   {reply, Reply, NewState};
-handle_call({become, RoleName, Op, Arguments}, _Sender, State) ->
-  handle_become(RoleName, Op, Arguments, State);
-handle_call({send_delayed_invite, ProtocolName, InviteeMonitorPid, RoleName},
+handle_call({become, ProtocolName, RoleName, ConversationID, Op,
+             Arguments}, _Sender, State) ->
+  handle_become(ProtocolName, RoleName, ConversationID, Op, Arguments, State);
+handle_call({send_delayed_invite, ProtocolName, InviteeRoleName, ConversationID, InviteeMonitorPid},
             _Sender, State) ->
-  handle_send_delayed_invite(ProtocolName, InviteeMonitorPid, RoleName, State);
+  handle_send_delayed_invite(ProtocolName, InviteeRoleName, ConversationID, InviteeMonitorPid, State);
 % Delegate directly to handle_call in monitor
 handle_call(Msg, From, State) ->
   ActorPid = State#conv_state.actor_pid,
@@ -311,8 +312,8 @@ handle_call(Msg, From, State) ->
 % Module:handle_cast(Request, State) -> Result
 % Only async messages are actually data ones.
 % Delivering these, we'll need a conv ID, I think.
-handle_cast({message, ConversationID, MessageData}, State) ->
-  handle_incoming_message(MessageData, ConversationID, State);
+handle_cast({message, ProtocolName, RoleName, ConversationID, MessageData}, State) ->
+  handle_incoming_message(MessageData, ProtocolName, RoleName, ConversationID, State);
 handle_cast(Other, State) ->
   %monitor_warn("Received unhandled async message ~p.", [Other], State),
   ActorPid = State#conv_state.actor_pid,

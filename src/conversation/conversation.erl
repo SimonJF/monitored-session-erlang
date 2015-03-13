@@ -19,8 +19,8 @@ initialise(SpecDir, Config) ->
 teardown() ->
   conversation_runtime_sup:teardown().
 
-send({ProtocolName, RoleName, MonitorPID}, Recipients, MessageName, Types, Payload)  ->
-  Res = gen_server:call(MonitorPID, {send_msg, ProtocolName, RoleName, Recipients, MessageName,
+send({ProtocolName, RoleName, ConversationID, MonitorPID}, Recipients, MessageName, Types, Payload)  ->
+  Res = gen_server:call(MonitorPID, {send_msg, ProtocolName, RoleName, ConversationID, Recipients, MessageName,
                         Types, Payload}),
   io:format("After send.~n"),
   case Res of
@@ -30,8 +30,8 @@ send({ProtocolName, RoleName, MonitorPID}, Recipients, MessageName, Types, Paylo
   end.
 
 % Used to transition to another role.
-become({_ProtocolName, _OldRole, MonitorPID}, RoleName, Operation, Arguments) ->
-  gen_server:call(MonitorPID, {become, RoleName, Operation, Arguments}).
+become({ProtocolName, _OldRole, ConversationID, MonitorPID}, RoleName, Operation, Arguments) ->
+  gen_server:call(MonitorPID, {become, ProtocolName, RoleName, ConversationID, Operation, Arguments}).
 
 % Starts a conversation, assigning the initiator to the given role.
 start_conversation(MonitorPID, ProtocolName, Role) ->
@@ -53,7 +53,7 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
           % If it has, we can return a key to use for the rest of the conversation.
           % I'm wondering whether this is the best design. Perhaps an "after_invite" thing might work.
           case InviteRes of
-            {ok, ok} -> {ok, {ProtocolName, Role, MonitorPID}};
+            {ok, ok} -> {ok, {ProtocolName, Role, ConvPID, MonitorPID }};
             Err -> Err
           end;
         Err ->
@@ -67,7 +67,7 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
       Err
   end.
 
-invite({ProtocolName, _RoleName, MonitorPID}, InviteeMonitorPID, InviteeRoleName) ->
-  gen_server:call(MonitorPID, {send_delayed_invite, ProtocolName,
-                               InviteeMonitorPID, InviteeRoleName}).
+invite({ProtocolName, _RoleName, ConversationID, MonitorPID}, InviteeMonitorPID, InviteeRoleName) ->
+  gen_server:call(MonitorPID, {send_delayed_invite, ProtocolName, InviteeRoleName, ConversationID,
+                               InviteeMonitorPID}).
 
