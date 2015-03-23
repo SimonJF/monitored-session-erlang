@@ -24,17 +24,20 @@
 
 
 % ssactor_init returns some state given some input args
-% ssactor_handle_message:
-%   SenderRole ->
-%   OperatorName ->
-%   PayloadTypes(?) ->
-%   Payload List ->
-%   State ->
-%   NewState
+% ssactor_handle_message handles a message
+% ssactor_join is called when the actor is invited to participate in a
+%   conversation. The user can decide to accept or decline this invitation.
+% ssactor_conversation_established is called when all actors have been invited.
+% ssactor_conversation_error is called when there was an error establishing the
+%   conversation.
 behaviour_info(callbacks) ->
     [{ssactor_init,2},
+     {ssactor_join,4},
      {ssactor_handle_message, 7},
      {ssactor_become, 5},
+     {ssactor_join, 4},
+     {ssactor_conversation_established, 5},
+     {ssactor_conversation_error, 4},
      {handle_call, 3},
      {handle_cast, 3},
      {handle_info, 3},
@@ -112,6 +115,19 @@ delegate_async(Fun, Msg, State) ->
 % to handle, in particular re: replies
 handle_call(ssa_get_monitor_id, _From, State) ->
   {reply, State#actor_state.monitor_pid, State};
+handle_call({ssa_join_conversation, ProtocolName, RoleName, ConversationID},
+            _From, State) ->
+  Module = State#actor_state.actor_type_name,
+  UserState = State#actor_state.user_state,
+  UserResult = Module:ssactor_join(ProtocolName, RoleName, ConversationID, UserState),
+  case UserResult of
+    {accept, NewUserState} ->
+      NewState = update_user_state(State, NewUserState),
+      {reply, accept, NewState};
+    {decline, NewUserState} ->
+      NewState = update_user_state(State, NewUserState),
+      {reply, decline, NewState}
+  end;
 handle_call({delegate_call, From, Msg}, _From, State) ->
   % Spoof From value
   handle_call(Msg, From, State);
@@ -156,12 +172,27 @@ handle_cast({ssa_msg, Protocol, Role, ConversationID, MsgData}, State) ->
                    Protocol, Role, ConversationID, Sender, Op, Payload, UserState,
                    {Protocol, Role, ConversationID, State#actor_state.monitor_pid}),
   {noreply, State#actor_state{user_state=NewUserState}};
-handle_cast(_Msg = {Protocol, Role, {become, Operation, Arguments}}, State) ->
+% Become
+handle_cast(_Msg = {become, Protocol, Role, Operation, Arguments, CID}, State) ->
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
-  NewUserState = Module:ssactor_become(Role, Operation, Arguments,
-                                       {Protocol, Role, State#actor_state.monitor_pid}, UserState),
+  NewUserState = Module:ssactor_become(Protocol, Role, Operation, Arguments,
+                                       {Protocol, Role, CID, State#actor_state.monitor_pid}, UserState),
   {noreply, State#actor_state{user_state=NewUserState}};
+% Setup failed
+handle_cast(_Msg = {ssa_conversation_setup_failed, Protocol, Role, Err}, State) ->
+  Module = State#actor_state.actor_type_name,
+  UserState = State#actor_state.user_state,
+  {ok, NewUserState} = Module:ssactor_conversation_error(Protocol, Role, Err, UserState),
+  {noreply, State#actor_state{user_state=NewUserState}};
+% Setup successful
+handle_cast(_Msg = {ssa_session_established, Protocol, Role, CID}, State) ->
+  Module = State#actor_state.actor_type_name,
+  UserState = State#actor_state.user_state,
+  ConvKey = {Protocol, Role, CID, State#actor_state.monitor_pid},
+  {ok, NewUserState} = Module:ssactor_conversation_established(Protocol, Role, CID, ConvKey, UserState),
+  {noreply, State#actor_state{user_state=NewUserState}};
+
 handle_cast(Msg, State) ->
   delegate_async(handle_cast, Msg, State).
 

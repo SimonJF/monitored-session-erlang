@@ -30,8 +30,12 @@ send({ProtocolName, RoleName, ConversationID, MonitorPID}, Recipients, MessageNa
   end.
 
 % Used to transition to another role.
-become({ProtocolName, _OldRole, ConversationID, MonitorPID}, RoleName, Operation, Arguments) ->
-  gen_server:call(MonitorPID, {become, ProtocolName, RoleName, ConversationID, Operation, Arguments}).
+become({_, _, _, MonitorPID}, RegAtom, RoleName, Operation, Arguments) ->
+  gen_server:call(MonitorPID, {become, RoleName, RegAtom, Operation, Arguments}).
+
+register_conversation(RegAtom, {ProtocolName, RoleName, ConvID, MonitorPID}) ->
+  actor_monitor:register_become(MonitorPID, RegAtom, ProtocolName, RoleName, ConvID).
+  %gen_server:call(MonitorPID, {register_become, ProtocolName, RoleName, ConvID}).
 
 % Starts a conversation, assigning the initiator to the given role.
 start_conversation(MonitorPID, ProtocolName, Role) ->
@@ -48,24 +52,16 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
       case ConversationProc of
         % And start the invitation system
         {ok, ConvPID} ->
-          InviteRes = protocol_registry:start_invitation(ProtocolName, ConvPID, Role, MonitorPID),
-          % Now, we'll know whether this has succeeded or not.
-          % If it has, we can return a key to use for the rest of the conversation.
-          % I'm wondering whether this is the best design. Perhaps an "after_invite" thing might work.
-          case InviteRes of
-            {ok, ok} -> {ok, {ProtocolName, Role, ConvPID, MonitorPID }};
-            Err -> Err
-          end;
+          protocol_registry:start_invitation(ProtocolName, ConvPID, Role, MonitorPID);
         Err ->
-          error_logger:error_msg("Error starting conversation for protocol ~s: ~p~n",
-                                 [ProtocolName, Err]),
-          Err
+          actor_monitor:conversation_setup_failed(MonitorPID, ProtocolName,
+                                                  Role, {bad_conversation_process, Err})
       end;
     Err ->
-      error_logger:error_msg("Error starting conversation for protocol ~s: ~p~n",
-                             [ProtocolName, Err]),
-      Err
-  end.
+      actor_monitor:conversation_setup_failed(MonitorPID, ProtocolName, Role,
+                                              {bad_role, Err})
+  end,
+  ok.
 
 invite({ProtocolName, _RoleName, ConversationID, MonitorPID}, InviteeMonitorPID, InviteeRoleName) ->
   gen_server:call(MonitorPID, {send_delayed_invite, ProtocolName, InviteeRoleName, ConversationID,

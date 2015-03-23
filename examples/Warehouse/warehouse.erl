@@ -16,10 +16,23 @@ ssactor_init(_Args, Monitor) ->
   % TODO: Need the possibility to return an error from ssactor_init
   #warehouse_state{item_db=ItemDB}.
 
+ssactor_join(_, _, _, State) -> {accept, State}.
+
+ssactor_conversation_established("Purchase", "Seller", _, _ConvKey, State) ->
+  {ok, State};
+ssactor_conversation_established("StoreLoad", "Store", _, ConvKey, State) ->
+  actor_logger:info(warehouse, "StoreLoad initiation complete, registering", []),
+  conversation:register_conversation(store_load, ConvKey),
+  {ok, State}.
+
+ssactor_conversation_error(_PN, _RN, Error, State) ->
+  actor_logger:error(buyer1, "Conversation setup falied: ~p~n", [Error]),
+  {ok, State}.
+
 restock(ConvKey, ProductName, Quantity) ->
   actor_logger:info(warehouse, "Purchase protocol: restocking ~s~n",
                    [ProductName]),
-  conversation:become(ConvKey, "Store", restock, [ProductName, Quantity]).
+  conversation:become(ConvKey, store_load, "Store", restock, [ProductName, Quantity]).
 
 
 % Purchase protocol -- we're the seller. Customer is the buyer.
@@ -60,9 +73,13 @@ ssactor_handle_message("Purchase", "Seller", _CID, SenderRole,
       conversation:send(Monitor, "error", [SenderRole], ["String"], ["Item not sold by this warehouse."]),
       State
   end;
+ssactor_handle_message("Purchase", "Seller", _CID, SenderRole,
+                       "quit", [], State, ConvKey) ->
+  actor_logger:info(warehouse, "Buyer quit.", []),
+  State;
 ssactor_handle_message("StoreLoad", "Store", _CID, _SenderRole, "quit", _,
                        State, _) -> State;
-ssactor_handle_message("StoreLoad", "Dealer", _CID, _SenderRole, "put",
+ssactor_handle_message("StoreLoad", "Store", _CID, _SenderRole, "put",
                        [ProductName, Quantity], State, _Monitor) ->
   ItemDB = get_item_db(State),
   NewDB = case orddict:find(ProductName, ItemDB) of
@@ -79,11 +96,9 @@ ssactor_handle_message("StoreLoad", "Store", _CID, _SenderRole,
 
 
 % ssactor_become: Rolename, Operation, Parameters
-ssactor_become("Store", restock, [ItemName, Quantity], ConvKey, State) ->
+ssactor_become("StoreLoad", "Store", restock, [ItemName, Quantity], ConvKey, State) ->
   actor_logger:info(warehouse, "StoreLoad protocol: sending restock request", []),
   conversation:send(ConvKey, ["Dealer"], "request", ["String", "Integer"], [ItemName, Quantity]),
   State.
-% StoreLoad protocol
-%ssactor_handle_message(SenderRole, "", ) -> ().
 
 

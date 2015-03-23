@@ -15,6 +15,11 @@
 
 ssactor_init(_Args, _Monitor) -> no_state. % We don't need no state round these parts
 
+ssactor_join(_, _, _, State) -> {accept, State}.
+
+ssactor_conversation_established(_, _, _, _, State) -> {ok, State}.
+ssactor_conversation_error(_, _, _, State) -> {ok, State}.
+
 ssactor_handle_message("TwoBuyers", "S", _CID, SenderRole, "title", [Title], _State, Monitor) ->
   actor_logger:info(seller, "Received title ~s from ~s", [Title, "TwoBuyers", "S", _CID, SenderRole]),
   conversation:send(Monitor, ["A", "B"], "quote", ["Integer"], [?PRICE]),

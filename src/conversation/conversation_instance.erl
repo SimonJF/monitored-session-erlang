@@ -45,7 +45,7 @@ get_endpoints([Role|Roles], RoleMap) ->
                {ok, [{Role, Endpoint}|Endpoints]};
              Err -> Err
            end;
-         true ->
+         not ProcessAlive ->
            {error, endpoint_terminated, Role}
       end;
     error ->
@@ -53,7 +53,7 @@ get_endpoints([Role|Roles], RoleMap) ->
   end.
 
 % Lookup the destination role, and forward to its monitor.
-route_message(ProtocolName, RoleName, Msg, State) ->
+route_message(ProtocolName, _RoleName, Msg, State) ->
   io:format("Message data: ~p~n", [Msg]),
   Recipients = message:message_recipients(Msg),
   RoleMap = State#conv_inst_state.role_mapping,
@@ -61,13 +61,36 @@ route_message(ProtocolName, RoleName, Msg, State) ->
   case get_endpoints(Recipients, RoleMap) of
     {ok, Endpoints} ->
       lists:foreach(fun({DestRole, Endpoint}) ->
-                      gen_server:cast(Endpoint,
-                                      {message, ProtocolName, DestRole, self(),
-                                       Msg})
+                        actor_monitor:deliver_message(Endpoint, ProtocolName,
+                                                      DestRole, self(), Msg)
                     end, Endpoints),
       {reply, ok, State};
     Err -> {reply, Err, State}
   end.
+
+% Checks whether the conversation is complete, and sends out
+% "complete" messages if so
+check_conversation_setup_complete(State) ->
+  RoleMapping = State#conv_inst_state.role_mapping,
+  SetupComplete = orddict:fold(
+                    fun(_K, V, A) ->
+                        Res = V =/= not_filled,
+                        Res and A end, true, RoleMapping),
+  % If it is complete, broadcast the conv setup complete message
+  if SetupComplete ->
+      broadcast_conv_setup(State);
+    not SetupComplete -> ok
+  end.
+
+broadcast_conv_setup(State) ->
+  ProtocolName = State#conv_inst_state.protocol_name,
+  RoleMapping = State#conv_inst_state.role_mapping,
+  orddict:fold(fun(K, V, _A) ->
+                   if is_pid(V) ->
+                        actor_monitor:conversation_success(V, ProtocolName, K, self());
+                      true -> ok
+                   end end, ok, RoleMapping).
+
 
 % Add the participant to the Role |-> Endpoint map
 register_participant(RoleName, Sender, State) ->
@@ -81,18 +104,32 @@ register_participant(RoleName, Sender, State) ->
                                       [RoleName], State),
                     RoleMap
                end,
-  {reply, ok, State#conv_inst_state{role_mapping=NewRoleMap}}.
+  NewState = State#conv_inst_state{role_mapping=NewRoleMap},
+  % Now check whether all non-transient roles have been
+  % fulfilled, notifying actors if so
+  check_conversation_setup_complete(NewState),
+  {reply, ok, NewState}.
+
+% Checks whether the role is transient in the rolespec or not.
+% Initial val is not_filled if it isn't, and not_filled_transient if it is.
+initial_filled_val({RoleName, {local_protocol, _, _, _, Roles, _}}) ->
+  lists:foldl(fun({Ty, RN}, Acc) ->
+                  if RN == RoleName andalso Ty == transient_role_decl ->
+                       not_filled_transient;
+                     true -> Acc
+                  end end, not_filled, Roles).
+
 
 fresh_state(ProtocolName, RoleNames) ->
   % Add the names to the map, so we can ensure we accept only roles which are
   % meant to be accepted...
-  EmptyMap = orddict:from_list(lists:map(fun(RoleName) ->
-                                             {RoleName, not_filled} end,
-                                        RoleNames)),
+  EmptyMap = orddict:from_list(lists:map(fun({RN, RS}) ->
+                                             {RN, initial_filled_val({RN, RS})}
+                                             end, RoleNames)),
   #conv_inst_state{protocol_name=ProtocolName, role_mapping=EmptyMap}.
 
 % Callbacks...
-init([ProtocolName, RoleNames]) -> {ok, fresh_state(ProtocolName, RoleNames)}.
+init([ProtocolName, RoleSpecs]) -> {ok, fresh_state(ProtocolName, RoleSpecs)}.
 
 handle_call({accept_invitation, RoleName}, {Sender, _}, State) ->
   register_participant(RoleName, Sender, State);

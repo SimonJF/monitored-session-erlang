@@ -70,8 +70,9 @@ invite_actors(ConversationID, InitiatorRole, InitiatorPID, State) ->
                                        end
                                    end, Roles),
       io:format("Filtered roles: ~p~n", [FilteredRoles]),
-      Res2 = invite_actors_inner(FilteredRoles, ConversationID, State),
-      {reply, Res2, State};
+      invite_actors_inner(FilteredRoles, ConversationID, State);
+      % TODO: Check for error, broadcast error if so.
+      % {reply, Res2, State};
     {error, Err} -> {error, {initiator_unable_to_fulfil, Err}}
   end.
 
@@ -139,10 +140,7 @@ handle_call({get_monitor, RoleName}, _From, State) ->
   Reply = orddict:find(RoleName, State#protocol_state.monitors),
   {reply, Reply, State};
 handle_call(get_roles, _From, State) ->
-  {reply, State#protocol_state.role_names, State};
-handle_call({begin_invitation, ConversationID, InitiatorRole, InitiatorPID},
-            _From, State) ->
-  invite_actors(ConversationID, InitiatorRole, InitiatorPID, State);
+  {reply, State#protocol_state.role_specs, State};
 handle_call({delayed_invitation, InviteeMonitorPID, RoleName, ConversationID}, _From, State) ->
   handle_delayed_invite(InviteeMonitorPID, RoleName, ConversationID, State);
 handle_call(Other, _From, State) ->
@@ -151,11 +149,15 @@ handle_call(Other, _From, State) ->
                            [protocol_name(State), Other]),
   {reply, ok, State}.
 
+handle_cast({begin_invitation, ConversationID, InitiatorRole, InitiatorPID},
+            State) ->
+  _Res = invite_actors(ConversationID, InitiatorRole, InitiatorPID, State),
+  {noreply, State};
 handle_cast(Request, State) ->
   error_logger:warning_msg("WARN: Protocol process ~s received " ++
                            "unhandled asynchronous messsage ~p.~n",
                            [protocol_name(State), Request]),
-  {reply, unhandled, State}.
+  {noreply, State}.
 
 
 handle_info(Request, State) ->

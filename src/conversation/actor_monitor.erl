@@ -7,9 +7,11 @@
                      actor_type_name, % Name of the attached actor type
                      active_protocols, % [{ProtocolName, RoleName, ConversationID}]
                      protocol_role_map, % Protocol Name |-> [Role]
+                     registered_become_conversations, % Atom |-> Conversation
                      clean_monitors, % Clean monitors: (ProtocolName, RoleName) |-> Monitor
-                     monitors % (ProtocolName, RoleName, ConversationID) |-> Monitor
+                     monitors % (RoleName, ConversationID) |-> Monitor
                     }).
+
 % New monitor state
 % Say we can be involved in multiple protocols, and multiple roles within each
 % protocol.
@@ -54,6 +56,7 @@ fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap) ->
               actor_type_name=ActorTypeName, % Name of the attached actor type
               active_protocols=orddict:new(),
               protocol_role_map=ProtocolRoleMap, % Roles for each protocol
+              registered_become_conversations=orddict:new(),
               monitors=orddict:new(),
               clean_monitors=orddict:new()
              }.
@@ -105,6 +108,7 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
   ActiveProtocols = State#conv_state.active_protocols,
   Monitors = State#conv_state.monitors,
   FreshMonitors = State#conv_state.clean_monitors,
+  ActorPID = State#conv_state.actor_pid,
   % First, check whether we can fulfil the role (ie it's contained in the PRM)
   io:format("PRM: ~p~n", [ProtocolRoleMap]),
   RoleFindRes =
@@ -117,26 +121,37 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
   FreshMonitorRes =
     orddict:find({ProtocolName, RoleName}, FreshMonitors),
 
-  % Next, check whether we've already fulfilled the role (that is, it's in
-  % the active_protocols map
-  AlreadyFulfilled =
+    % Check to see whether we already have an entry for the protocol-role-cid
+    % triple. If not, then we can fulfil it.
+    AlreadyFulfilled =
     lists:any(fun(ActiveTuple) ->
                   ActiveTuple == {ProtocolName, RoleName, ConversationID} end,
               ActiveProtocols),
 
     case {RoleFindRes, AlreadyFulfilled, FreshMonitorRes} of
     {true, false, {ok, FreshMonitor}} ->
-      % We can fulfil it!
-      NewActiveProtocols = orddict:append(ProtocolName, RoleName, ActiveProtocols),
-      NewMonitors = orddict:store({ProtocolName, RoleName, ConversationID},
-                                  FreshMonitor, Monitors),
-      % TODO: Try-Catch round this, in case the conversation goes away
-      Res = gen_server:call(ConversationID, {accept_invitation, RoleName}),
-      case Res of
-        % Now, add the <Protocol, Role, CID> |-> Monitor mapping
-        ok -> {ok, State#conv_state{active_protocols=NewActiveProtocols,
-                                    monitors=NewMonitors}};
-        {error, Err} -> {error, Err}
+      % We can theoretically fulfil it. Just need to ask the actor...
+      JoinRequestResult = gen_server:call(ActorPID,
+                                          {ssa_join_conversation,
+                                           ProtocolName,
+                                           RoleName,
+                                           ConversationID}),
+      case JoinRequestResult of
+        accept ->
+          NewActiveProtocols = orddict:append(ProtocolName, RoleName, ActiveProtocols),
+          NewMonitors = orddict:store({ProtocolName, RoleName, ConversationID},
+                                      FreshMonitor, Monitors),
+
+          % TODO: Try-Catch round this, in case the conversation goes away
+          Res = gen_server:call(ConversationID, {accept_invitation, RoleName}),
+          case Res of
+            % Now, add the <Protocol, Role, CID> |-> Monitor mapping
+            ok -> {ok, State#conv_state{active_protocols=NewActiveProtocols,
+                                        monitors=NewMonitors}};
+            {error, Err} -> {error, Err}
+          end;
+        decline ->
+          {error, actor_declined}
       end;
     {_, true, _} -> {error, already_fulfilled};
     _Other -> {error, cannot_fulfil}
@@ -191,16 +206,23 @@ handle_incoming_message(MessageData, ProtocolName, RoleName, ConversationID,
     _Err -> {noreply, State} % assuming the error has been logged already
   end.
 
-handle_become(ProtocolName, RoleName, ConversationID, Operation, Arguments, State) ->
+handle_register_conv(ProtocolName, _RoleName, ConversationID, RegAtom, State) ->
+  RegisteredConversations = State#conv_state.registered_become_conversations,
+  NewRegisteredConversations = orddict:store(RegAtom, {ProtocolName, ConversationID}, RegisteredConversations),
+  NewState = State#conv_state{registered_become_conversations = NewRegisteredConversations},
+  {reply, ok, NewState}.
+
+
+handle_become(RegAtom, RoleName, Operation, Arguments, State) ->
   RecipientPID = State#conv_state.actor_pid,
-  ProtocolRoleMap = State#conv_state.protocol_role_map,
-  % TODO: It's not going to be the same conversation ID. How do we disambiguate?
-  RoleOk = list_contains({ProtocolName, RoleName, ConversationID}, ProtocolRoleMap),
-  if RoleOk ->
-      gen_server:cast(RecipientPID, {ProtocolName, RoleName, {become, Operation, Arguments}}),
+  RegisteredConversations = State#conv_state.registered_become_conversations,
+  CIDRes = orddict:find(RegAtom, RegisteredConversations),
+  case CIDRes of
+    {ok, {ProtocolName, CID}} ->
+      gen_server:cast(RecipientPID, {become, ProtocolName, RoleName, Operation, Arguments, CID}),
       {reply, ok, State};
-     not RoleOk ->
-       {reply, error, bad_role}
+    _ ->
+      {reply, error, bad_conversation}
   end.
 
 handle_outgoing_message(CurrentProtocol, CurrentRole, ConversationID, Recipients,
@@ -292,13 +314,14 @@ handle_call({send_msg, CurrentProtocol, CurrentRole, ConversationID, Recipients,
     handle_outgoing_message(CurrentProtocol, CurrentRole, ConversationID, Recipients,
                             MessageName, Types, Payload, State),
   {reply, Reply, NewState};
-handle_call({become, ProtocolName, RoleName, ConversationID, Op,
-             Arguments}, _Sender, State) ->
-  handle_become(ProtocolName, RoleName, ConversationID, Op, Arguments, State);
+handle_call({become, RoleName, RegAtom, Operation, Arguments}, _Sender, State) ->
+  handle_become(RegAtom, RoleName, Operation, Arguments, State);
 handle_call({send_delayed_invite, ProtocolName, InviteeRoleName, ConversationID, InviteeMonitorPid},
             _Sender, State) ->
   handle_send_delayed_invite(ProtocolName, InviteeRoleName, ConversationID, InviteeMonitorPid, State);
 % Delegate directly to handle_call in monitor
+handle_call({register_become, RegAtom, ProtocolName, RoleName, ConvID}, _From, State) ->
+  handle_register_conv(ProtocolName, RoleName, ConvID, RegAtom, State);
 handle_call(Msg, From, State) ->
   ActorPid = State#conv_state.actor_pid,
   Reply = gen_server:call(ActorPid, {delegate_call, From, Msg}),
@@ -314,8 +337,8 @@ handle_call(Msg, From, State) ->
 % Delivering these, we'll need a conv ID, I think.
 handle_cast({message, ProtocolName, RoleName, ConversationID, MessageData}, State) ->
   handle_incoming_message(MessageData, ProtocolName, RoleName, ConversationID, State);
+
 handle_cast(Other, State) ->
-  %monitor_warn("Received unhandled async message ~p.", [Other], State),
   ActorPid = State#conv_state.actor_pid,
   gen_server:cast(ActorPid, Other),
   {noreply, State}.
@@ -333,3 +356,21 @@ terminate(Reason, State) ->
 code_change(_Old, State, _Extra) ->
   {ok, State}.
 
+
+
+%% Internal API Functions
+
+
+deliver_message(MonitorPID, ProtocolName, RoleName, ConvID, Msg) ->
+  gen_server:cast(MonitorPID, {message, ProtocolName, RoleName, ConvID, Msg}).
+
+register_become(MonitorPID, RegAtom, ProtocolName, RoleName, ConvID) ->
+  gen_server:call(MonitorPID, {register_become, RegAtom, ProtocolName, RoleName, ConvID}).
+
+% Called when conversation setup succeeds
+conversation_success(MonitorPID, ProtocolName, RoleName, ConvID) ->
+  gen_server:cast(MonitorPID, {ssa_session_established, ProtocolName, RoleName, ConvID}).
+%  ssactor_conversation_established(PN, RN, _CID, ConvKey, State) ->
+% Called when conversation setup failed, for whatever reason
+conversation_setup_failed(MonitorPID, ProtocolName, RoleName, Error) ->
+  gen_server:cast(MonitorPID, {ssa_conversation_setup_failed, ProtocolName, RoleName, Error}).
