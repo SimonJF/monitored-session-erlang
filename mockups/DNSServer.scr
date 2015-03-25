@@ -1,11 +1,11 @@
 global protocol HandleDNSRequest(
-  role UDPHandlerServer, role DNSQueryResolver, transient role DNSZoneRegServer,
-  role DNSZoneDataServer) {
+  role UDPHandlerServer, role DNSZoneRegServer,
+  transient role DNSZoneDataServer) {
 
   ResolveQuery(EncodedRequest) from UDPHandlerServer to DNSQueryResolver;
   // Query resolution inner loop
   rec QueryResolution {
-    GetNearestZone(Zone) from DNSQueryResolver to DNSZoneRegServer;
+    FindNearestZone(Zone) from DNSQueryResolver to DNSZoneRegServer;
     ZoneResponse(Resonse) from DNSZoneDataServer to DNSQueryResolver;
     choice at DNSQueryResolver {
       invitation from DNSQueryResolver for DNSZoneDataServer {

@@ -22,7 +22,6 @@ teardown() ->
 send({ProtocolName, RoleName, ConversationID, MonitorPID}, Recipients, MessageName, Types, Payload)  ->
   Res = gen_server:call(MonitorPID, {send_msg, ProtocolName, RoleName, ConversationID, Recipients, MessageName,
                         Types, Payload}),
-  io:format("After send.~n"),
   case Res of
     ok -> ok;
     Err ->

@@ -1,8 +1,0 @@
-module src.com.simonjf.scribbletest.DelayedTest_C;
-
-local protocol DelayedTest at C(role A,role B, transient role C) {
-	Y() from B;
-	Z() to B;
-	Y() from B;
-	Z() to B;
-}
