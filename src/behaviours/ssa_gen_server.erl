@@ -73,6 +73,16 @@ init([Module, UserArgs]) ->
                                          [self(),
                                           Module,
                                           ProtocolRoleMap], []),
+  finish_init(Module, UserArgs, MonitorProcess);
+init([RegName, Module, UserArgs]) ->
+  ProtocolRoleMap = actor_type_registry:get_protocol_role_map(Module),
+  MonitorProcess = gen_server:start_link(
+                     RegName, actor_monitor,
+                     [self(), Module, ProtocolRoleMap], []),
+  finish_init(Module, UserArgs, MonitorProcess).
+
+
+finish_init(Module, UserArgs, MonitorProcess) ->
   process_flag(trap_exit, true),
   case MonitorProcess of
     {ok, MonitorPid} ->
@@ -232,9 +242,18 @@ start(ModuleName, Args, Options) ->
   Res = gen_server:start(ssa_gen_server, [ModuleName, Args], Options),
   unwrap_start_result(Res).
 
+start(RegName, ModuleName, Args, Options) ->
+  Res = gen_server:start(ssa_gen_server, [RegName, ModuleName, Args], Options),
+  unwrap_start_result(Res).
+
 start_link(ModuleName, Args, Options) ->
   Res = gen_server:start_link(ssa_gen_server, [ModuleName, Args], Options),
   unwrap_start_result(Res).
+
+start_link(RegName, ModuleName, Args, Options) ->
+  Res = gen_server:start_link(ssa_gen_server, [RegName, ModuleName, Args], Options),
+  unwrap_start_result(Res).
+
 
 
 call(ServerRef, Message) ->

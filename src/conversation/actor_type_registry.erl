@@ -34,8 +34,6 @@ spawn_children(Config) ->
 
 % Gets the PID for an actor type process with the given name
 get_actor_type_pid(ActorTypeName, ActorTypeRegistry) ->
-  io:format("ActorTypeName: ~p, ActorTypeRegistry: ~p~n", [ActorTypeName,
-                                                           orddict:to_list(ActorTypeRegistry)]),
   orddict:find(ActorTypeName, ActorTypeRegistry).
 
 

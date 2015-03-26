@@ -91,7 +91,6 @@ init([ActorPid, ActorTypeName, ProtocolRoleMap]) ->
   MonitorDict = load_monitors(orddict:to_list(ProtocolRoleMap),
                               orddict:new(),
                               State),
-  io:format("Clean monitors: ~p~n", [orddict:to_list(MonitorDict)]),
   {ok, State#conv_state{clean_monitors=MonitorDict}}.
 
 
