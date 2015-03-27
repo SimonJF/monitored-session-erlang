@@ -109,7 +109,6 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
   FreshMonitors = State#conv_state.clean_monitors,
   ActorPID = State#conv_state.actor_pid,
   % First, check whether we can fulfil the role (ie it's contained in the PRM)
-  io:format("PRM: ~p~n", [ProtocolRoleMap]),
   RoleFindRes =
     case orddict:find(ProtocolName, ProtocolRoleMap) of
       {ok, ProtocolRoles} ->
@@ -234,7 +233,6 @@ handle_outgoing_message(CurrentProtocol, CurrentRole, ConversationID, Recipients
   case MonitorRes of
       {ok, Reply, NewState} -> {Reply, NewState};
       Err ->
-        %io:format("Err triggered in handle_outgoing_msg: ~p~n", [Err]),
         {Err, State}
   end.
 

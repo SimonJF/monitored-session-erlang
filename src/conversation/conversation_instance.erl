@@ -3,7 +3,9 @@
 -behaviour(gen_server).
 
 -record(conv_inst_state, {protocol_name,
-                          role_mapping}).
+                          role_mapping,
+                          setup_complete_broadcast
+                         }).
 
 % Essentially a routing table for the conversation instance.
 % Needs to have functionality for actor-role discovery.
@@ -72,14 +74,16 @@ route_message(ProtocolName, _RoleName, Msg, State) ->
 % "complete" messages if so
 check_conversation_setup_complete(State) ->
   RoleMapping = State#conv_inst_state.role_mapping,
+  AlreadySetup = State#conv_inst_state.setup_complete_broadcast,
   SetupComplete = orddict:fold(
                     fun(_K, V, A) ->
                         Res = V =/= not_filled,
                         Res and A end, true, RoleMapping),
   % If it is complete, broadcast the conv setup complete message
-  if SetupComplete ->
-      broadcast_conv_setup(State);
-    not SetupComplete -> ok
+  if not AlreadySetup andalso SetupComplete ->
+      broadcast_conv_setup(State),
+      State#conv_inst_state{setup_complete_broadcast=true};
+    true -> State
   end.
 
 broadcast_conv_setup(State) ->
@@ -107,8 +111,8 @@ register_participant(RoleName, Sender, State) ->
   NewState = State#conv_inst_state{role_mapping=NewRoleMap},
   % Now check whether all non-transient roles have been
   % fulfilled, notifying actors if so
-  check_conversation_setup_complete(NewState),
-  {reply, ok, NewState}.
+  NewState1 = check_conversation_setup_complete(NewState),
+  {reply, ok, NewState1}.
 
 % Checks whether the role is transient in the rolespec or not.
 % Initial val is not_filled if it isn't, and not_filled_transient if it is.
@@ -126,7 +130,8 @@ fresh_state(ProtocolName, RoleNames) ->
   EmptyMap = orddict:from_list(lists:map(fun({RN, RS}) ->
                                              {RN, initial_filled_val({RN, RS})}
                                              end, RoleNames)),
-  #conv_inst_state{protocol_name=ProtocolName, role_mapping=EmptyMap}.
+  #conv_inst_state{protocol_name=ProtocolName, role_mapping=EmptyMap,
+                   setup_complete_broadcast=false}.
 
 % Callbacks...
 init([ProtocolName, RoleSpecs]) -> {ok, fresh_state(ProtocolName, RoleSpecs)}.
