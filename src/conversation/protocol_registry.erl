@@ -1,14 +1,10 @@
 -module(protocol_registry).
--behaviour(gen_server).
+-behaviour(gen_server2).
 -compile(export_all).
 -define(PROTOCOL_REGISTRY, ssa_protocol_registry).
 
 %%% Registry for protocol processes.
 %%% Maps protocol names to protocol processes.
-
-
-start_link(Args) ->
-  gen_server:start_link({local, ?PROTOCOL_REGISTRY}, protocol_registry, Args, []).
 
 % Find the actors which are involved in the protocol, and devise a mapping
 % from roles to actor types.
@@ -51,7 +47,7 @@ generate_role_actor_map(ProtocolName, Config) ->
 spawn_child(ProtocolName, RoleDict, ProcDict, Config) ->
   RoleActorMap = generate_role_actor_map(ProtocolName, Config),
   io:format("Role |-> actor map for PT~s: ~p~n", [ProtocolName, orddict:to_list(RoleActorMap)]),
-  Result = gen_server:start(protocol_type, [ProtocolName, RoleDict, RoleActorMap], []),
+  Result = gen_server2:start(protocol_type, [ProtocolName, RoleDict, RoleActorMap], []),
   case Result of
     {ok, Pid} -> orddict:store(ProtocolName, Pid, ProcDict);
     Error ->
@@ -107,7 +103,7 @@ code_change(_PV, ProtocolRegistry, _Ex) ->
 
 % Internal API functions
 get_protocol_pid(ProtocolName) ->
-  gen_server:call(?PROTOCOL_REGISTRY, {get_process_id, ProtocolName}).
+  gen_server2:call(?PROTOCOL_REGISTRY, {get_process_id, ProtocolName}).
 
 % Looks up a protocol name, sends a message if the protocol exists
 with_protocol_process(ProtocolName, Func) ->
@@ -121,7 +117,7 @@ with_protocol_process(ProtocolName, Func) ->
 get_monitor(ProtocolName, RoleName) ->
   MonitorFunc =
     fun (ProtocolPid) ->
-      MonitorRes = gen_server:call(ProtocolPid, {get_monitor, RoleName}),
+      MonitorRes = protocol_type:get_monitor(ProtocolPID, RoleName),
       case MonitorRes of
         {ok, Monitor} -> {ok, Monitor};
         error -> {error, nonexistent_monitor} % Couldn't find the monitor
@@ -130,20 +126,27 @@ get_monitor(ProtocolName, RoleName) ->
 
 
 get_roles(ProtocolName) ->
-  GetRoleFunc = fun (ProtocolPid) -> gen_server:call(ProtocolPid, get_roles) end,
+  GetRoleFunc = fun (ProtocolPid) -> protocol_type:get_roles(ProtocolPid) end,
   with_protocol_process(ProtocolName, GetRoleFunc).
 
 start_invitation(ProtocolName, ConversationID, InitiatorRole, InitiatorPID) ->
   StartInviteFunc = fun (ProtocolPid) ->
-                        gen_server:cast(ProtocolPid, {begin_invitation, ConversationID,
-                                                      InitiatorRole, InitiatorPID})
+                        protocol_type:begin_invitation(ProtocolPID, ConversationID,
+                                                       InitiatorRole, InitiatorPID)
                     end,
   with_protocol_process(ProtocolName, StartInviteFunc).
 
 invite_actor_direct(ProtocolName, ConversationID, RoleName, InviteeMonitorPID) ->
-  InviteDirectFunc = fun (ProtocolPid) ->
-                         gen_server:call(ProtocolPid,
-                                         {delayed_invitation, InviteeMonitorPID,
-                                          RoleName, ConversationID})
+  InviteDirectFunc = fun (ProtocolPID) ->
+                         protocol_type:delayed_invitation(ProtocolPID, InviteeMonitorPID,
+                                                          RoleName, ConversationID)
                      end,
   with_protocol_process(ProtocolName, InviteDirectFunc).
+
+%%%%
+%%%% API
+%%%%
+
+start_link(Args) ->
+  gen_server2:start_link({global, ?PROTOCOL_REGISTRY}, protocol_registry, Args, []).
+

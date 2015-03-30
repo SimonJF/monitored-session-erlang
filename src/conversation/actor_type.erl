@@ -1,5 +1,5 @@
 -module(actor_type).
--behaviour(gen_server).
+-behaviour(gen_server2).
 -compile(export_all).
 
 -record(actor_type_state, {name,
@@ -30,8 +30,7 @@ handle_invite_inner([], ProtocolName, RoleName, _) ->
   {error, no_registered_actor};
 handle_invite_inner([Instance|Instances], ProtocolName, RoleName, ConversationID) ->
   % Try and invite the actor instance to fulfil the role.
-  Res = gen_server:call(Instance,
-                        {invitation, ProtocolName, RoleName, ConversationID}),
+  Res = invite(Instance, ProtocolName, RoleName, ConversationID),
   case Res of
     % Wahey, it's added.
     ok -> ok;
@@ -83,4 +82,13 @@ terminate(Reason, State) ->
                          "terminated for reason ~w.~n",
                          [State#actor_type_state.name, Reason]),
   ok.
+
+
+%%%%
+%%%% API
+%%%%
+
+invite(PID, ProtocolName, RoleName, ConversationID) ->
+  gen_server2:call(Instance, {invitation, ProtocolName, RoleName,
+                              ConversationID}).
 

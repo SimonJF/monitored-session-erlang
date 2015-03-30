@@ -19,22 +19,20 @@ initialise(SpecDir, Config) ->
 teardown() ->
   conversation_runtime_sup:teardown().
 
-send({ProtocolName, RoleName, ConversationID, MonitorPID}, Recipients, MessageName, Types, Payload)  ->
-  Res = gen_server:call(MonitorPID, {send_msg, ProtocolName, RoleName, ConversationID, Recipients, MessageName,
-                        Types, Payload}),
+send(ConvKey, Recipients, MessageName, Types, Payload) ->
+  Res = actor_monitor:send_message(ConvKey, Recipients, MessageName, Types,
+                                   Payload),
   case Res of
     ok -> ok;
-    Err ->
-      error(Err)
+    Err -> error(Err)
   end.
 
 % Used to transition to another role.
-become({_, _, _, MonitorPID}, RegAtom, RoleName, Operation, Arguments) ->
-  gen_server:call(MonitorPID, {become, RoleName, RegAtom, Operation, Arguments}).
+become(ConvKey, RegAtom, RoleName, Operation, Arguments) ->
+  actor_monitor:become(ConvKey, RegAtom, RoleName, Operation, Arguments).
 
 register_conversation(RegAtom, {ProtocolName, RoleName, ConvID, MonitorPID}) ->
   actor_monitor:register_become(MonitorPID, RegAtom, ProtocolName, RoleName, ConvID).
-  %gen_server:call(MonitorPID, {register_become, ProtocolName, RoleName, ConvID}).
 
 % Starts a conversation, assigning the initiator to the given role.
 start_conversation(MonitorPID, ProtocolName, Role) ->
@@ -43,11 +41,10 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
   error_logger:info_msg("Starting conversation for protocol ~s.~n",
                          [ProtocolName]),
   RoleRes = protocol_registry:get_roles(ProtocolName),
-
   case RoleRes of
     {ok, Roles} ->
       % Next, need to start a new conversation process
-      ConversationProc = gen_server:start(conversation_instance, [ProtocolName, Roles], []),
+      ConversationProc = conversation_instance:start(ProtocolName, Roles),
       case ConversationProc of
         % And start the invitation system
         {ok, ConvPID} ->
@@ -62,7 +59,6 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
   end,
   ok.
 
-invite({ProtocolName, _RoleName, ConversationID, MonitorPID}, InviteeMonitorPID, InviteeRoleName) ->
-  gen_server:call(MonitorPID, {send_delayed_invite, ProtocolName, InviteeRoleName, ConversationID,
-                               InviteeMonitorPID}).
+invite(ConvKey, InviteeMonitorPID, InviteeRoleName) ->
+  actor_monitor:invite(ConvKey, InviteeMonitorPID, InviteeRoleName).
 

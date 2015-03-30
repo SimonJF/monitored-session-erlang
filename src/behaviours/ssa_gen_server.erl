@@ -1,5 +1,5 @@
 -module(ssa_gen_server).
--behaviour(gen_server).
+-behaviour(gen_server2).
 
 -compile(export_all).
 -record(actor_state, {actor_type_name,
@@ -66,17 +66,17 @@ actor_info(Format, Args, State) ->
   log_msg(fun error_logger:info_msg/2, Format, Args, State).
 
 
-% gen_server callbacks
+% gen_server2 callbacks
 init([Module, UserArgs]) ->
   ProtocolRoleMap = actor_type_registry:get_protocol_role_map(Module),
-  MonitorProcess = gen_server:start_link(actor_monitor,
+  MonitorProcess = gen_server2:start_link(actor_monitor,
                                          [self(),
                                           Module,
                                           ProtocolRoleMap], []),
   finish_init(Module, UserArgs, MonitorProcess);
 init([RegName, Module, UserArgs]) ->
   ProtocolRoleMap = actor_type_registry:get_protocol_role_map(Module),
-  MonitorProcess = gen_server:start_link(
+  MonitorProcess = gen_server2:start_link(
                      RegName, actor_monitor,
                      [self(), Module, ProtocolRoleMap], []),
   finish_init(Module, UserArgs, MonitorProcess).
@@ -96,8 +96,8 @@ finish_init(Module, UserArgs, MonitorProcess) ->
   end.
 
 
-% Delegate calls, casts (other than ssa internal messages), info messages and temrination
-% messages to the actor.
+% Delegate calls, casts (other than ssa internal messages), info messages 
+% and termination messages to the actor.
 
 delegate_async(Fun, Msg, State) ->
   Module = State#actor_state.actor_type_name,
@@ -186,8 +186,10 @@ handle_cast({ssa_msg, Protocol, Role, ConversationID, MsgData}, State) ->
 handle_cast(_Msg = {become, Protocol, Role, Operation, Arguments, CID}, State) ->
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
-  NewUserState = Module:ssactor_become(Protocol, Role, Operation, Arguments,
-                                       {Protocol, Role, CID, State#actor_state.monitor_pid}, UserState),
+  NewUserState =
+    Module:ssactor_become(Protocol, Role, Operation, Arguments,
+                          {Protocol, Role, CID, State#actor_state.monitor_pid}, 
+                          UserState),
   {noreply, State#actor_state{user_state=NewUserState}};
 % Setup failed
 handle_cast(_Msg = {ssa_conversation_setup_failed, Protocol, Role, Err}, State) ->
@@ -200,7 +202,9 @@ handle_cast(_Msg = {ssa_session_established, Protocol, Role, CID}, State) ->
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
   ConvKey = {Protocol, Role, CID, State#actor_state.monitor_pid},
-  {ok, NewUserState} = Module:ssactor_conversation_established(Protocol, Role, CID, ConvKey, UserState),
+  {ok, NewUserState} =
+    Module:ssactor_conversation_established(Protocol, Role, CID,
+                                            ConvKey, UserState),
   {noreply, State#actor_state{user_state=NewUserState}};
 
 handle_cast(Msg, State) ->
@@ -229,41 +233,37 @@ terminate(Reason, State) ->
 % address all requests (even unmonitored ones) to the monitor, which
 % forwards the requests.
 unwrap_start_result({ok, ActorPid}) ->
-  MonitorPid = gen_server:call(ActorPid, ssa_get_monitor_id),
+  MonitorPid = gen_server2:call(ActorPid, ssa_get_monitor_id),
   {ok, MonitorPid};
 unwrap_start_result(Other) -> Other.
 
 % Public API
-%
-
-
 
 start(ModuleName, Args, Options) ->
-  Res = gen_server:start(ssa_gen_server, [ModuleName, Args], Options),
+  Res = gen_server2:start(ssa_gen_server, [ModuleName, Args], Options),
   unwrap_start_result(Res).
 
 start(RegName, ModuleName, Args, Options) ->
-  Res = gen_server:start(ssa_gen_server, [RegName, ModuleName, Args], Options),
+  Res = gen_server2:start(ssa_gen_server, [RegName, ModuleName, Args], Options),
   unwrap_start_result(Res).
 
 start_link(ModuleName, Args, Options) ->
-  Res = gen_server:start_link(ssa_gen_server, [ModuleName, Args], Options),
+  Res = gen_server2:start_link(ssa_gen_server, [ModuleName, Args], Options),
   unwrap_start_result(Res).
 
 start_link(RegName, ModuleName, Args, Options) ->
-  Res = gen_server:start_link(ssa_gen_server, [RegName, ModuleName, Args], Options),
+  Res = gen_server2:start_link(ssa_gen_server, [RegName, ModuleName, Args], Options),
   unwrap_start_result(Res).
 
 
-
 call(ServerRef, Message) ->
-  gen_server:call(ServerRef, Message).
+  gen_server2:call(ServerRef, Message).
 
 call(ServerRef, Message, Timeout) ->
-  gen_server:call(ServerRef, Message, Timeout).
+  gen_server2:call(ServerRef, Message, Timeout).
 
 cast(ServerRef, Message) ->
-  gen_server:cast(ServerRef, Message).
+  gen_server2:cast(ServerRef, Message).
 
 reply(ServerRef, Message) ->
-  gen_server:reply(ServerRef, Message).
+  gen_server2:reply(ServerRef, Message).

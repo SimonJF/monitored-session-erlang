@@ -1,6 +1,6 @@
 -module(actor_monitor).
 
--behaviour(gen_server).
+-behaviour(gen_server2).
 -compile(export_all).
 -import(util, [list_contains/2]).
 -record(conv_state, {actor_pid, % PID of the attached actor
@@ -28,7 +28,7 @@
 % Always handle conversation termination messages, removing from active
 % conversation list.
 %
-% New architecture for actor_monitor: use a gen_server instead of a gen_fsm, as
+% New architecture for actor_monitor: use a gen_server2 instead of a gen_fsm, as
 % we no longer have to differentiate between the idle / setup / working states.
 % As soon as we respond to the invitation message, we can partake in interactions
 % for the registered conversation ID.
@@ -129,7 +129,7 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
     case {RoleFindRes, AlreadyFulfilled, FreshMonitorRes} of
     {true, false, {ok, FreshMonitor}} ->
       % We can theoretically fulfil it. Just need to ask the actor...
-      JoinRequestResult = gen_server:call(ActorPID,
+      JoinRequestResult = gen_server2:call(ActorPID,
                                           {ssa_join_conversation,
                                            ProtocolName,
                                            RoleName,
@@ -141,7 +141,7 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
                                       FreshMonitor, Monitors),
 
           % TODO: Try-Catch round this, in case the conversation goes away
-          Res = gen_server:call(ConversationID, {accept_invitation, RoleName}),
+          Res = gen_server2:call(ConversationID, {accept_invitation, RoleName}),
           case Res of
             % Now, add the <Protocol, Role, CID> |-> Monitor mapping
             ok -> {ok, State#conv_state{active_protocols=NewActiveProtocols,
@@ -185,13 +185,13 @@ handle_terminate_conversation(ConversationID, State) ->
   {reply, ok, NewState}.
 
 
-% Here, we deliver the message to the attached actor (which is a gen_server).
+% Here, we deliver the message to the attached actor (which is a gen_server2).
 deliver_incoming_message(Protocol, Role, ConvID, Msg, State) ->
   RecipientPID = State#conv_state.actor_pid,
-  gen_server:cast(RecipientPID, {ssa_msg, Protocol, Role, ConvID, Msg}).
+  gen_server2:cast(RecipientPID, {ssa_msg, Protocol, Role, ConvID, Msg}).
 
 deliver_outgoing_message(Msg, ProtocolName, RoleName, ConversationID) ->
-  gen_server:call(ConversationID, {outgoing_msg, ProtocolName, RoleName, Msg}).
+  gen_server2:call(ConversationID, {outgoing_msg, ProtocolName, RoleName, Msg}).
 
 % Handles an incoming message. Checks whether we're in the correct conversation,
 % then grabs the monitor, then checks / updates the monitor state.
@@ -217,7 +217,7 @@ handle_become(RegAtom, RoleName, Operation, Arguments, State) ->
   CIDRes = orddict:find(RegAtom, RegisteredConversations),
   case CIDRes of
     {ok, {ProtocolName, CID}} ->
-      gen_server:cast(RecipientPID, {become, ProtocolName, RoleName, Operation, Arguments, CID}),
+      gen_server2:cast(RecipientPID, {become, ProtocolName, RoleName, Operation, Arguments, CID}),
       {reply, ok, State};
     _ ->
       {reply, error, bad_conversation}
@@ -321,7 +321,7 @@ handle_call({register_become, RegAtom, ProtocolName, RoleName, ConvID}, _From, S
   handle_register_conv(ProtocolName, RoleName, ConvID, RegAtom, State);
 handle_call(Msg, From, State) ->
   ActorPid = State#conv_state.actor_pid,
-  Reply = gen_server:call(ActorPid, {delegate_call, From, Msg}),
+  Reply = gen_server2:call(ActorPid, {delegate_call, From, Msg}),
   {reply, Reply, State}.
 
 %handle_call(Other, Sender, State) ->
@@ -337,7 +337,7 @@ handle_cast({message, ProtocolName, RoleName, ConversationID, MessageData}, Stat
 
 handle_cast(Other, State) ->
   ActorPid = State#conv_state.actor_pid,
-  gen_server:cast(ActorPid, Other),
+  gen_server2:cast(ActorPid, Other),
   {noreply, State}.
 
 handle_info(Info, State) ->
@@ -359,15 +359,31 @@ code_change(_Old, State, _Extra) ->
 
 
 deliver_message(MonitorPID, ProtocolName, RoleName, ConvID, Msg) ->
-  gen_server:cast(MonitorPID, {message, ProtocolName, RoleName, ConvID, Msg}).
+  gen_server2:cast(MonitorPID, {message, ProtocolName, RoleName, ConvID, Msg}).
 
 register_become(MonitorPID, RegAtom, ProtocolName, RoleName, ConvID) ->
-  gen_server:call(MonitorPID, {register_become, RegAtom, ProtocolName, RoleName, ConvID}).
+  gen_server2:call(MonitorPID, {register_become, RegAtom, ProtocolName, RoleName, ConvID}).
 
 % Called when conversation setup succeeds
 conversation_success(MonitorPID, ProtocolName, RoleName, ConvID) ->
-  gen_server:cast(MonitorPID, {ssa_session_established, ProtocolName, RoleName, ConvID}).
-%  ssactor_conversation_established(PN, RN, _CID, ConvKey, State) ->
+  gen_server2:cast(MonitorPID, {ssa_session_established, ProtocolName, RoleName, ConvID}).
+
 % Called when conversation setup failed, for whatever reason
 conversation_setup_failed(MonitorPID, ProtocolName, RoleName, Error) ->
-  gen_server:cast(MonitorPID, {ssa_conversation_setup_failed, ProtocolName, RoleName, Error}).
+  gen_server2:cast(MonitorPID, {ssa_conversation_setup_failed, ProtocolName, RoleName, Error}).
+
+become(ConvKey, RegAtom, RoleName, Operation, Arguments) ->
+  gen_server2:call(MonitorPID, {become, RoleName, RegAtom, Operation, Arguments}).
+
+
+invite(ConvKey, InviteeMonitorPID, InviteeRoleName) ->
+  gen_server2:call(MonitorPID, {send_delayed_invite, ProtocolName,
+                               InviteeRoleName, ConversationID,
+                               InviteeMonitorPID}).
+
+send_message({ProtocolName, RoleName, ConversationID, MonitorPID},
+             Recipients, MessageName, Types, Payload) ->
+  gen_server:call(MonitorPID,
+                  {send_msg, ProtocolName, RoleName, ConversationID,
+                   Recipients, MessageName, Types, Payload}).
+

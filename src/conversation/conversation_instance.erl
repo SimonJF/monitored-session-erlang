@@ -1,6 +1,6 @@
 -module(conversation_instance).
 -compile(export_all).
--behaviour(gen_server).
+-behaviour(gen_server2).
 
 -record(conv_inst_state, {protocol_name,
                           role_mapping,
@@ -155,3 +155,11 @@ handle_info(Msg, State) ->
 
 code_change(_Prev, State, _Extra) -> {ok, State}.
 terminate(_Reason, _State) -> ok.
+
+%%%%
+%%%% API
+%%%%
+
+start(ProtocolName, Roles) ->
+  gen_server2:start(conversation_instance, [ProtocolName, Roles], []).
+

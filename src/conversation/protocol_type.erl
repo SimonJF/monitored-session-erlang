@@ -1,5 +1,7 @@
 -module(protocol_type).
 -compile(export_all).
+-behaviour(gen_server2).
+
 % Protocol type process. (AKA Protocol Manager, which makes more sense)
 % Capabilities:
 %  * Return monitors for process roles
@@ -174,3 +176,22 @@ terminate(Reason, State) ->
 code_change(_Old, State, _Extra) ->
   {ok, State}.
 
+
+%%%%
+%%%% API
+%%%%
+
+delayed_invitation(ProtocolPID, InviteeMonitorPID, RoleName, ConversationID) ->
+  gen_server2:call(ProtocolPID, {delayed_invitation, InviteeMonitorPID,
+                                 RoleName, ConversationID}).
+
+get_roles(ProtocolPID) ->
+  gen_server2:call(ProtocolPID, get_roles).
+
+
+begin_invitation(ProtocolPID, ConversationID, InitiatorRole, InitiatorPID) ->
+  gen_server2:cast(ProtocolPID, {begin_invitation, ConversationID,
+                   InitiatorRole, InitiatorPID}).
+
+get_monitor(ProtocolPID, RoleName) ->
+  gen_server2:call(ProtocolPID, {get_monitor, RoleName}).
