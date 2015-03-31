@@ -11,8 +11,9 @@ extract_protocols({module, _, _, _, Protocols}) ->
                 {local_protocol, ProtocolName, ProjRoleName, _, _, _} ->
                   {true, {ProtocolName, ProjRoleName, Protocol}};
                 _Other ->
-                  error_logger:warning_msg("WARN: Couldn't extract protocol of wrong type ~p~n",
-                                           [Protocol]),
+                  % It's a global protocol
+                  %error_logger:warning_msg("WARN: Couldn't extract protocol of wrong type ~p~n",
+                  %                         [Protocol]),
                   false
               end end, Protocols);
 extract_protocols(Other) ->
@@ -23,7 +24,6 @@ extract_protocols(Other) ->
 append_protocol_roles(ProtocolEntries, Dict) ->
   lists:foldl(fun({ProtocolName, RoleName, ProtocolAST}, RunningPRD) ->
                   % First, get the ProtocolName |-> RoleSpec dict
-                  io:format("Storing role ~s to rolespec ~p mapping ~n", [RoleName, ProtocolAST]),
                   ProtocolRoleDictRes = orddict:find(ProtocolName, RunningPRD),
                   case ProtocolRoleDictRes of
                     {ok, ProtocolRoleDict} ->

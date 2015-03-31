@@ -372,11 +372,11 @@ conversation_success(MonitorPID, ProtocolName, RoleName, ConvID) ->
 conversation_setup_failed(MonitorPID, ProtocolName, RoleName, Error) ->
   gen_server2:cast(MonitorPID, {ssa_conversation_setup_failed, ProtocolName, RoleName, Error}).
 
-become(ConvKey, RegAtom, RoleName, Operation, Arguments) ->
+become(MonitorPID, RegAtom, RoleName, Operation, Arguments) ->
   gen_server2:call(MonitorPID, {become, RoleName, RegAtom, Operation, Arguments}).
 
 
-invite(ConvKey, InviteeMonitorPID, InviteeRoleName) ->
+invite({ProtocolName, _, ConversationID, MonitorPID}, InviteeMonitorPID, InviteeRoleName) ->
   gen_server2:call(MonitorPID, {send_delayed_invite, ProtocolName,
                                InviteeRoleName, ConversationID,
                                InviteeMonitorPID}).

@@ -89,6 +89,6 @@ terminate(Reason, State) ->
 %%%%
 
 invite(PID, ProtocolName, RoleName, ConversationID) ->
-  gen_server2:call(Instance, {invitation, ProtocolName, RoleName,
+  gen_server2:call(PID, {invitation, ProtocolName, RoleName,
                               ConversationID}).
 

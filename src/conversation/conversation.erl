@@ -28,8 +28,8 @@ send(ConvKey, Recipients, MessageName, Types, Payload) ->
   end.
 
 % Used to transition to another role.
-become(ConvKey, RegAtom, RoleName, Operation, Arguments) ->
-  actor_monitor:become(ConvKey, RegAtom, RoleName, Operation, Arguments).
+become({_, _, _, MonitorPID}, RegAtom, RoleName, Operation, Arguments) ->
+  actor_monitor:become(MonitorPID, RegAtom, RoleName, Operation, Arguments).
 
 register_conversation(RegAtom, {ProtocolName, RoleName, ConvID, MonitorPID}) ->
   actor_monitor:register_become(MonitorPID, RegAtom, ProtocolName, RoleName, ConvID).

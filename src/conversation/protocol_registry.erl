@@ -30,9 +30,9 @@ generate_role_actor_map(ProtocolName, Config) ->
                       % Great, we've found it -- add to the dict
                       add_actor_to_map(ActorModuleName, RoleNames, Dict);
                     false ->
-                      error_logger:warning_msg("Could not find protocol ~s in protocol map " ++
-                                                "for actor ~p.~n",
-                                                [ProtocolName, ActorModuleName]),
+                      %error_logger:warning_msg("Could not find protocol ~s in protocol map " ++
+                      %                          "for actor ~p.~n",
+                      %                          [ProtocolName, ActorModuleName]),
                       Dict
                   end end, orddict:new(), Config).
 
@@ -46,7 +46,6 @@ generate_role_actor_map(ProtocolName, Config) ->
 % ProcDict: Dict of protocol processes
 spawn_child(ProtocolName, RoleDict, ProcDict, Config) ->
   RoleActorMap = generate_role_actor_map(ProtocolName, Config),
-  io:format("Role |-> actor map for PT~s: ~p~n", [ProtocolName, orddict:to_list(RoleActorMap)]),
   Result = gen_server2:start(protocol_type, [ProtocolName, RoleDict, RoleActorMap], []),
   case Result of
     {ok, Pid} -> orddict:store(ProtocolName, Pid, ProcDict);
@@ -116,7 +115,7 @@ with_protocol_process(ProtocolName, Func) ->
 % Gets the monitor for a role in a given process
 get_monitor(ProtocolName, RoleName) ->
   MonitorFunc =
-    fun (ProtocolPid) ->
+    fun (ProtocolPID) ->
       MonitorRes = protocol_type:get_monitor(ProtocolPID, RoleName),
       case MonitorRes of
         {ok, Monitor} -> {ok, Monitor};
@@ -130,7 +129,7 @@ get_roles(ProtocolName) ->
   with_protocol_process(ProtocolName, GetRoleFunc).
 
 start_invitation(ProtocolName, ConversationID, InitiatorRole, InitiatorPID) ->
-  StartInviteFunc = fun (ProtocolPid) ->
+  StartInviteFunc = fun (ProtocolPID) ->
                         protocol_type:begin_invitation(ProtocolPID, ConversationID,
                                                        InitiatorRole, InitiatorPID)
                     end,
@@ -148,5 +147,5 @@ invite_actor_direct(ProtocolName, ConversationID, RoleName, InviteeMonitorPID) -
 %%%%
 
 start_link(Args) ->
-  gen_server2:start_link({global, ?PROTOCOL_REGISTRY}, protocol_registry, Args, []).
+  gen_server2:start_link({local, ?PROTOCOL_REGISTRY}, protocol_registry, Args, []).
 
