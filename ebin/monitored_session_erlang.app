@@ -5,6 +5,8 @@
              conversation_runtime_sup,
              message, monitor, monitor_gen, protocol_loader,
              protocol_registry, protocol_type, scribble_ast, scribble_lexer,
-             scribble_parser, scribble_tokens, ssa_gen_server, util]},
+             scribble_parser, scribble_tokens, ssa_gen_server, util,
+             gen_server2, priority_queue
+            ]},
   {registered, [conv_runtime_sup, ssa_actor_type_registry, ssa_protocol_registry]}
 ]}.
