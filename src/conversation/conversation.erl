@@ -2,7 +2,6 @@
 -compile(export_all).
 -define(PROTOCOL_REGISTRY, ssa_protocol_registry).
 -define(ACTOR_TYPE_REGISTRY, ssa_actor_type_registry).
--define(RUNTIME_PROC_NAME, conv_runtime_sup).
 
 %%% Conversation API.
 %%% This is the outward-facing API for session initiation and monitoring.
@@ -13,8 +12,7 @@
 % Initialises the system. Must be called prior to doing anything else!
 initialise(SpecDir, Config) ->
   error_logger:info_msg("Initialising conversation system.~n", []),
-  supervisor:start_link({local, ?RUNTIME_PROC_NAME},
-                        conversation_runtime_sup, [SpecDir, Config]).
+  conversation_runtime_sup:start_link(SpecDir, Config).
 
 teardown() ->
   conversation_runtime_sup:teardown().

@@ -36,11 +36,14 @@ conversation_info(Format, Args, State) ->
 % {error, role_not found, Role} if role is not in the mapping table,
 % {error, endpoint_terminated, Role} if the Role |-> Endpoint mapping
 % is stale
+is_a_node(Node) -> Node =/= nonode@nohost.
+
 get_endpoints([], _RoleMap) -> {ok, []};
 get_endpoints([Role|Roles], RoleMap) ->
   case orddict:find(Role, RoleMap) of
     {ok, Endpoint} ->
-      ProcessAlive = is_process_alive(Endpoint),
+      ProcessAlive = (is_a_node(node()) and is_a_node(node(Endpoint)))
+                      or is_process_alive(Endpoint),
       if ProcessAlive ->
            case get_endpoints(Roles, RoleMap) of
              {ok, Endpoints} ->

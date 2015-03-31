@@ -16,5 +16,9 @@ init([SpecDir, Config]) ->
                      permanent, brutal_kill, worker, [actor_type_registry]},
   {ok, {{one_for_all, 2, 60}, [ProtocolRegProc, ActorRegProc]}}.
 
+start_link(SpecDir, Config) ->
+  supervisor:start_link({global, ?RUNTIME_PROC_NAME},
+                        conversation_runtime_sup, [SpecDir, Config]).
+
 teardown() ->
   exit(whereis(?RUNTIME_PROC_NAME), kill).
