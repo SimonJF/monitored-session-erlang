@@ -102,7 +102,7 @@ code_change(_PV, ProtocolRegistry, _Ex) ->
 
 % Internal API functions
 get_protocol_pid(ProtocolName) ->
-  gen_server2:call(?PROTOCOL_REGISTRY, {get_process_id, ProtocolName}).
+  gen_server2:call({global, ?PROTOCOL_REGISTRY}, {get_process_id, ProtocolName}).
 
 % Looks up a protocol name, sends a message if the protocol exists
 with_protocol_process(ProtocolName, Func) ->
@@ -147,5 +147,5 @@ invite_actor_direct(ProtocolName, ConversationID, RoleName, InviteeMonitorPID) -
 %%%%
 
 start_link(Args) ->
-  gen_server2:start_link({local, ?PROTOCOL_REGISTRY}, protocol_registry, Args, []).
+  gen_server2:start_link({global, ?PROTOCOL_REGISTRY}, protocol_registry, Args, []).
 

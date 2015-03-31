@@ -1,5 +1,5 @@
 -module(actor_type_registry).
--behaviour(gen_server).
+-behaviour(gen_server2).
 -compile(export_all).
 -define(ACTOR_TYPE_REGISTRY, ssa_actor_type_registry).
 
@@ -8,11 +8,11 @@
 %%% Maps actor type names to actor type processes.
 %%% Note: actor type processes != actor instances!
 start_link(Args) ->
-  gen_server:start_link({local, ?ACTOR_TYPE_REGISTRY}, actor_type_registry, Args, []).
+  gen_server2:start_link({global, ?ACTOR_TYPE_REGISTRY}, actor_type_registry, Args, []).
 
 
 spawn_child(ActorModuleName, ProtocolRoleMap, ProcDict) ->
-  Result = gen_server:start(actor_type, [ActorModuleName, ProtocolRoleMap], []),
+  Result = gen_server2:start(actor_type, [ActorModuleName, ProtocolRoleMap], []),
   case Result of
     {ok, Pid} -> orddict:store(ActorModuleName, Pid, ProcDict);
     Error ->
@@ -42,7 +42,7 @@ get_actor_type_pid(ActorTypeName, ActorTypeRegistry) ->
 actor_type_call(ActorTypeName, Message, ActorTypeRegistry) ->
   case get_actor_type_pid(ActorTypeName, ActorTypeRegistry) of
     {ok, ActorTypePid} ->
-      gen_server:call(ActorTypePid, Message);
+      gen_server2:call(ActorTypePid, Message);
     Other ->
       io:format("Other in actor_type_call: ~p~n", [Other]),
       {error, actor_type_not_registered}
@@ -112,7 +112,7 @@ terminate(Reason, _State) ->
 
 
 with_actor_process(ActorTypeName, Func) ->
-  ActorPidRes = gen_server:call(?ACTOR_TYPE_REGISTRY,
+  ActorPidRes = gen_server2:call({global, ?ACTOR_TYPE_REGISTRY},
                                 {get_process_id, ActorTypeName}),
   case ActorPidRes of
     {ok, ProcessPid} -> Func(ProcessPid);
@@ -126,21 +126,21 @@ with_actor_process(ActorTypeName, Func) ->
 
 % Invite an actor to fulfil a role
 invite_actor_to_role(ActorTypeName, ProtocolName, RoleName, ConversationID) ->
-  gen_server:call(?ACTOR_TYPE_REGISTRY,
+  gen_server2:call({global, ?ACTOR_TYPE_REGISTRY},
                   {invite_actor, ActorTypeName, ProtocolName, RoleName,
                    ConversationID}).
 
 % Gets the protocol-role mapping for a given actor type
 get_protocol_role_map(ActorTypeName) ->
   Func = fun (ProcessPid) ->
-             gen_server:call(ProcessPid, get_protocol_role_map) end,
+             gen_server2:call(ProcessPid, get_protocol_role_map) end,
   with_actor_process(ActorTypeName, Func).
 
 
 register_actor_instance(ActorType, ActorPid) ->
-  gen_server:call(?ACTOR_TYPE_REGISTRY, {register_actor, ActorType, ActorPid}).
+  gen_server2:call({global, ?ACTOR_TYPE_REGISTRY}, {register_actor, ActorType, ActorPid}).
 
 deregister_actor_instance(ActorType, ActorPid) ->
-  gen_server:call(?ACTOR_TYPE_REGISTRY, {deregister_actor, ActorType, ActorPid}).
+  gen_server2:call({global, ?ACTOR_TYPE_REGISTRY}, {deregister_actor, ActorType, ActorPid}).
 
 
