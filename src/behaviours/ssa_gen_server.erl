@@ -38,6 +38,7 @@ behaviour_info(callbacks) ->
      {ssactor_join, 4},
      {ssactor_conversation_established, 5},
      {ssactor_conversation_error, 4},
+     {ssactor_conversation_ended, 3},
      {handle_call, 3},
      {handle_cast, 3},
      {handle_info, 3},
@@ -96,7 +97,7 @@ finish_init(Module, UserArgs, MonitorProcess) ->
   end.
 
 
-% Delegate calls, casts (other than ssa internal messages), info messages 
+% Delegate calls, casts (other than ssa internal messages), info messages
 % and termination messages to the actor.
 
 delegate_async(Fun, Msg, State) ->
@@ -188,7 +189,7 @@ handle_cast(_Msg = {become, Protocol, Role, Operation, Arguments, CID}, State) -
   UserState = State#actor_state.user_state,
   NewUserState =
     Module:ssactor_become(Protocol, Role, Operation, Arguments,
-                          {Protocol, Role, CID, State#actor_state.monitor_pid}, 
+                          {Protocol, Role, CID, State#actor_state.monitor_pid},
                           UserState),
   {noreply, State#actor_state{user_state=NewUserState}};
 % Setup failed
@@ -206,7 +207,12 @@ handle_cast(_Msg = {ssa_session_established, Protocol, Role, CID}, State) ->
     Module:ssactor_conversation_established(Protocol, Role, CID,
                                             ConvKey, UserState),
   {noreply, State#actor_state{user_state=NewUserState}};
-
+% Conversation ended
+handle_cast({conversation_ended, CID, Reason}, State) ->
+  Module = State#actor_state.actor_type_name,
+  UserState = State#actor_state.user_state,
+  {ok, NewUserState} = Module:ssactor_conversation_ended(CID, Reason, UserState),
+  {noreply, State#actor_state{user_state=NewUserState}};
 handle_cast(Msg, State) ->
   delegate_async(handle_cast, Msg, State).
 
@@ -267,3 +273,10 @@ cast(ServerRef, Message) ->
 
 reply(ServerRef, Message) ->
   gen_server2:reply(ServerRef, Message).
+
+
+%%%%%%%%%%%%%
+%%%% API %%%%
+%%%%%%%%%%%%%
+conversation_ended(ActorPID, CID, Reason) ->
+  gen_server2:cast(ActorPID, {conversation_ended, CID, Reason}).

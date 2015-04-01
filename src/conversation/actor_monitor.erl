@@ -123,8 +123,8 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
     % triple. If not, then we can fulfil it.
     AlreadyFulfilled =
     lists:any(fun(ActiveTuple) ->
-                  ActiveTuple == {ProtocolName, RoleName, ConversationID} end,
-              ActiveProtocols),
+                  ActiveTuple == {ProtocolName, {RoleName, ConversationID}} end,
+              orddict:to_list(ActiveProtocols)),
 
     case {RoleFindRes, AlreadyFulfilled, FreshMonitorRes} of
     {true, false, {ok, FreshMonitor}} ->
@@ -136,7 +136,7 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
                                            ConversationID}),
       case JoinRequestResult of
         accept ->
-          NewActiveProtocols = orddict:append(ProtocolName, RoleName, ActiveProtocols),
+          NewActiveProtocols = orddict:append(ProtocolName, {RoleName, ConversationID}, ActiveProtocols),
           NewMonitors = orddict:store({ProtocolName, RoleName, ConversationID},
                                       FreshMonitor, Monitors),
 
@@ -175,16 +175,6 @@ handle_invitation(ProtocolName, RoleName, ConversationID, State) ->
       {reply, {error, Err}, State}
   end.
 
-% Handle termination of a conversation -- remove from the conversation
-handle_terminate_conversation(ConversationID, State) ->
-  ActiveProtocols = State#conv_state.active_protocols,
-  NewActiveProtocols = lists:filter(fun({_,_, CID}) -> CID =/= ConversationID end,
-                                    ActiveProtocols),
-  NewState = State#conv_state{active_protocols=NewActiveProtocols},
-  monitor_info("Exiting conversation ~p.~n", [ConversationID], State),
-  {reply, ok, NewState}.
-
-
 % Here, we deliver the message to the attached actor (which is a gen_server2).
 deliver_incoming_message(Protocol, Role, ConvID, Msg, State) ->
   RecipientPID = State#conv_state.actor_pid,
@@ -203,6 +193,37 @@ handle_incoming_message(MessageData, ProtocolName, RoleName, ConversationID,
     {ok, NewState} -> {noreply, NewState};
     _Err -> {noreply, State} % assuming the error has been logged already
   end.
+
+filter_orddict(PredFun, Orddict) ->
+  orddict:from_list(lists:filter(PredFun, orddict:to_list(Orddict))).
+
+filter_active_protocols(ActiveProtocolsDict, ConvID) ->
+  ActiveProtocolsList = orddict:to_list(ActiveProtocolsDict),
+  FilteredList =
+    lists:map(fun({PN, RoleCIDTuples}) ->
+                  FilteredTuples = lists:filter(fun({_R, CID}) -> CID =/= ConvID end,
+                                                RoleCIDTuples),
+                  {PN, FilteredTuples} end, ActiveProtocolsList),
+  orddict:to_list(FilteredList).
+
+handle_conversation_ended(ConversationID, Reason, State) ->
+  ActorPID = State#conv_state.actor_pid,
+  {ActiveProtocols, BecomeConvs, Monitors} = {State#conv_state.active_protocols,
+                                              State#conv_state.registered_become_conversations,
+                                              State#conv_state.monitors},
+  NewActiveProtocols = filter_active_protocols(ActiveProtocols, ConversationID),
+  NewMonitors = filter_orddict(fun({{_, _, CID}, _}) -> CID =/= ConversationID end,
+                              Monitors),
+  NewBecomeConversations = filter_orddict(fun({_, CID}) -> CID =/= ConversationID end,
+                                          BecomeConvs),
+
+  NewState = State#conv_state{active_protocols=NewActiveProtocols,
+                              registered_become_conversations=NewBecomeConversations,
+                              monitors=NewMonitors
+                             },
+
+  ssa_gen_server:conversation_ended(ActorPID, ConversationID, Reason),
+  {noreply, NewState}.
 
 handle_register_conv(ProtocolName, _RoleName, ConversationID, RegAtom, State) ->
   RegisteredConversations = State#conv_state.registered_become_conversations,
@@ -303,8 +324,6 @@ handle_send_delayed_invite(ProtocolName, RoleName, ConversationID, InviteeMonito
 %  * Termination
 handle_call({invitation, ProtocolName, RoleName, ConversationID}, _Sender, State) ->
   handle_invitation(ProtocolName, RoleName, ConversationID, State);
-handle_call({terminate_conversation, ConversationID}, _Sender, State) ->
-  handle_terminate_conversation(ConversationID, State);
 handle_call({send_msg, CurrentProtocol, CurrentRole, ConversationID, Recipients,
              MessageName, Types, Payload}, _Sender, State) ->
   {Reply, NewState} =
@@ -334,7 +353,8 @@ handle_call(Msg, From, State) ->
 % Delivering these, we'll need a conv ID, I think.
 handle_cast({message, ProtocolName, RoleName, ConversationID, MessageData}, State) ->
   handle_incoming_message(MessageData, ProtocolName, RoleName, ConversationID, State);
-
+handle_cast({conversation_ended, CID, Reason}, State) ->
+  handle_conversation_ended(CID, Reason, State);
 handle_cast(Other, State) ->
   ActorPid = State#conv_state.actor_pid,
   gen_server2:cast(ActorPid, Other),
@@ -354,9 +374,9 @@ code_change(_Old, State, _Extra) ->
   {ok, State}.
 
 
-
-%% Internal API Functions
-
+%%%%%%%%%%%%%%%%%%%
+%% API Functions %%
+%%%%%%%%%%%%%%%%%%%
 
 deliver_message(MonitorPID, ProtocolName, RoleName, ConvID, Msg) ->
   gen_server2:cast(MonitorPID, {message, ProtocolName, RoleName, ConvID, Msg}).
@@ -383,7 +403,12 @@ invite({ProtocolName, _, ConversationID, MonitorPID}, InviteeMonitorPID, Invitee
 
 send_message({ProtocolName, RoleName, ConversationID, MonitorPID},
              Recipients, MessageName, Types, Payload) ->
-  gen_server:call(MonitorPID,
+  gen_server2:call(MonitorPID,
                   {send_msg, ProtocolName, RoleName, ConversationID,
                    Recipients, MessageName, Types, Payload}).
+
+% Called by the conversation instance to notify the actor that the conversation has died
+conversation_ended(MonitorPID, CID, Reason) ->
+  gen_server2:cast(MonitorPID, {conversation_ended, CID, Reason}).
+
 

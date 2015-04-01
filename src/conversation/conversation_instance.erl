@@ -138,6 +138,19 @@ fresh_state(ProtocolName, RoleNames) ->
   #conv_inst_state{protocol_name=ProtocolName, role_mapping=EmptyMap,
                    setup_complete_broadcast=false}.
 
+handle_end_conversation(Reason, State) ->
+  % Only send one notification per actor.
+  % I think, for now, at least.
+  RoleMappingList = orddict:to_list(State#conv_inst_state.role_mapping),
+  PIDs = lists:map(fun({_, Pid}) -> Pid end, RoleMappingList),
+  UniqList = sets:to_list(sets:from_list(PIDs)),
+  lists:foreach(fun(Pid) -> actor_monitor:conversation_ended(Pid, self(), Reason) end,
+                UniqList),
+  exit(normal),
+  {noreply, State}.
+
+
+
 % Callbacks...
 init([ProtocolName, RoleSpecs]) -> {ok, fresh_state(ProtocolName, RoleSpecs)}.
 
@@ -149,6 +162,8 @@ handle_call(Other, Sender, State) ->
   conversation_warn("Unhandled sync message ~w from ~p", [Other, Sender], State),
   {noreply, State}.
 
+handle_cast({end_conversation, Reason}, State) ->
+  handle_end_conversation(Reason, State);
 handle_cast(Other, State) ->
   conversation_warn("Unhandled async message ~w.", [Other], State),
   {noreply, State}.
@@ -167,4 +182,7 @@ terminate(_Reason, _State) -> ok.
 
 start(ProtocolName, Roles) ->
   gen_server2:start(conversation_instance, [ProtocolName, Roles], []).
+
+end_conversation(ConvID, Reason) ->
+  gen_server2:cast(ConvID, {end_conversation, Reason}).
 
