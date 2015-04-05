@@ -223,3 +223,6 @@ send(Message, MonitorInstance) ->
 % and advance the monitor state
 recv(Message, MonitorInstance) ->
   check_message(recv, Message, MonitorInstance).
+
+role_name(MonitorInstance) ->
+  MonitorInstance#monitor_instance.role_name.

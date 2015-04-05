@@ -66,7 +66,9 @@ spawn_children(ProtocolMappings, Config) ->
               ProtocolMappings).
 
 
-%% OTP Callback Functions
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%% Callbacks
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % Spawn processes for each of the protocol names
 init([ProtocolMappings, Config]) ->
@@ -100,10 +102,6 @@ terminate(Reason, _ProtocolRegistry) ->
 code_change(_PV, ProtocolRegistry, _Ex) ->
   {ok, ProtocolRegistry}.
 
-% Internal API functions
-get_protocol_pid(ProtocolName) ->
-  gen_server2:call({global, ?PROTOCOL_REGISTRY}, {get_process_id, ProtocolName}).
-
 % Looks up a protocol name, sends a message if the protocol exists
 with_protocol_process(ProtocolName, Func) ->
   ProtocolPidRes = get_protocol_pid(ProtocolName),
@@ -111,6 +109,15 @@ with_protocol_process(ProtocolName, Func) ->
     {ok, ProtocolPid} -> {ok, Func(ProtocolPid)};
     error -> {error, bad_protocol_name} % Couldn't find the protocol process
   end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%% API
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Gets the PID of a protocol
+get_protocol_pid(ProtocolName) ->
+  gen_server2:call({global, ?PROTOCOL_REGISTRY}, {get_process_id, ProtocolName}).
+
 
 % Gets the monitor for a role in a given process
 get_monitor(ProtocolName, RoleName) ->
@@ -128,6 +135,11 @@ get_roles(ProtocolName) ->
   GetRoleFunc = fun (ProtocolPid) -> protocol_type:get_roles(ProtocolPid) end,
   with_protocol_process(ProtocolName, GetRoleFunc).
 
+get_monitors(ProtocolName) ->
+  GetRoleFunc = fun (ProtocolPid) -> protocol_type:get_monitors(ProtocolPid) end,
+  with_protocol_process(ProtocolName, GetRoleFunc).
+
+
 start_invitation(ProtocolName, ConversationID, InitiatorRole, InitiatorPID) ->
   StartInviteFunc = fun (ProtocolPID) ->
                         protocol_type:begin_invitation(ProtocolPID, ConversationID,
@@ -141,10 +153,6 @@ invite_actor_direct(ProtocolName, ConversationID, RoleName, InviteeMonitorPID) -
                                                           RoleName, ConversationID)
                      end,
   with_protocol_process(ProtocolName, InviteDirectFunc).
-
-%%%%
-%%%% API
-%%%%
 
 start_link(Args) ->
   gen_server2:start_link({global, ?PROTOCOL_REGISTRY}, protocol_registry, Args, []).

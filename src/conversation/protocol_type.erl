@@ -143,6 +143,8 @@ handle_call({get_monitor, RoleName}, _From, State) ->
   {reply, Reply, State};
 handle_call(get_roles, _From, State) ->
   {reply, State#protocol_state.role_specs, State};
+handle_call(get_monitors, _From, State) ->
+  {reply, State#protocol_state.monitors, State};
 handle_call({delayed_invitation, InviteeMonitorPID, RoleName, ConversationID}, _From, State) ->
   handle_delayed_invite(InviteeMonitorPID, RoleName, ConversationID, State);
 handle_call(Other, _From, State) ->
@@ -177,9 +179,9 @@ code_change(_Old, State, _Extra) ->
   {ok, State}.
 
 
-%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%% API
-%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 delayed_invitation(ProtocolPID, InviteeMonitorPID, RoleName, ConversationID) ->
   gen_server2:call(ProtocolPID, {delayed_invitation, InviteeMonitorPID,
@@ -195,3 +197,7 @@ begin_invitation(ProtocolPID, ConversationID, InitiatorRole, InitiatorPID) ->
 
 get_monitor(ProtocolPID, RoleName) ->
   gen_server2:call(ProtocolPID, {get_monitor, RoleName}).
+
+get_monitors(ProtocolPID) ->
+  gen_server2:call(ProtocolPID, get_monitors).
+
