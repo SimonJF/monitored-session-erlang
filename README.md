@@ -29,11 +29,6 @@ implementation that aren't in Scribble, and conversely I haven't
 implemented all of the features of Scribble (interruptible and parallel
 scopes).
 
-One new feature I've implemented is *transient roles* -- roles which are
-not auto-populated upon session initiation and are only valid within an
-*invitation scope*. This captures some patterns that weren't expressible
-beforehand.
-
 A primary objective is to see how dynamic monitoring of session types
 interacts with the concept of supervision trees. My guess is that it's
 largely orthogonal, combined with the Let It Fail mentality of Erlang /
