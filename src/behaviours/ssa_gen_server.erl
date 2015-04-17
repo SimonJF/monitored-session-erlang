@@ -275,3 +275,8 @@ reply(ServerRef, Message) ->
 %%%%%%%%%%%%%
 conversation_ended(ActorPID, CID, Reason) ->
   gen_server2:cast(ActorPID, {conversation_ended, CID, Reason}).
+
+message(ActorPID, ProtocolName, RoleName, ConvID, Msg) ->
+  gen_server2:cast(ActorPID, {ssa_msg, ProtocolName, RoleName, ConvID, Msg}).
+
+

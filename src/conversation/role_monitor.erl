@@ -35,13 +35,24 @@ monitor_info(Format, Args, State) ->
   log_msg(fun error_logger:info_msg/2, Format, Args, State).
 
 
-% Here, we deliver the message to the attached actor (which is a gen_server2).
-deliver_incoming_message(Msg, State) ->
+% Here, we queue the message, pending commit once all parties have received it
+queue_incoming_message(Msg, State) ->
   ActorPid = State#role_monitor_state.actor_pid,
   ProtocolName = State#role_monitor_state.protocol_name,
   RoleName = State#role_monitor_state.role_name,
   ConversationID = State#role_monitor_state.conversation_id,
-  gen_server2:cast(ActorPid, {ssa_msg, ProtocolName, RoleName, ConversationID, Msg}).
+  actor_proxy:queue_message(ActorPid, ProtocolName, RoleName,
+                            ConversationID, Msg).
+
+% "Commit" the message, sending it to the program logic
+commit_incoming_message(MsgRef, State) ->
+  ActorPID = State#role_monitor_state.actor_pid,
+  actor_proxy:deliver_message(ActorPID, MsgRef).
+
+% Drop the message from the queue
+drop_incoming_message(MsgRef, State) ->
+  ActorPID = State#role_monitor_state.actor_pid,
+  actor_proxy:drop_message(ActorPID, MsgRef).
 
 %deliver_outgoing_message(Msg, State) ->
 %  ProtocolName = State#role_monitor_state.protocol_name,
@@ -86,7 +97,7 @@ monitor_msg(CommType, MessageData, State) ->
           % Return ok, indicating the monitor's fine, and store the new monitor
           {ok, NewState};
         recv ->
-          deliver_incoming_message(MessageData, NewState),
+          queue_incoming_message(MessageData, NewState),
           {ok, NewState}
       end;
     {error, Err, _Monitor} ->
@@ -146,6 +157,12 @@ handle_cast({conversation_ended, Reason}, State) ->
         actor_proxy:conversation_ended(ActorProxyPID, ConversationID, Reason) end,
   with_actor_pid(EndedFun, State),
   {noreply, State};
+handle_cast({commit_message, MsgRef}, State) ->
+  commit_incoming_message(MsgRef, State),
+  {noreply, State};
+handle_cast({drop_message, MsgRef}, State) ->
+  drop_incoming_message(MsgRef, State),
+  {noreply, State};
 handle_cast(Other, State) ->
   error_logger:warning_msg("Unhandled cast message in role_monitor: ~p~n", [Other]),
   {noreply, State}.
@@ -171,6 +188,12 @@ send_message(MonitorPID, Message) ->
 
 receive_message(MonitorPID, Message) ->
   gen_server2:call(MonitorPID, {receive_ssa_message, Message}).
+
+commit_message(MonitorPID, MsgRef) ->
+  gen_server2:cast(MonitorPID, {commit_message, MsgRef}).
+
+drop_message(MonitorPID, MsgRef) ->
+  gen_server2:cast(MonitorPID, {drop_message, MsgRef}).
 
 start_link(ProtocolName, RoleName, ConversationID, MonitorFSM) ->
   gen_server2:start_link(role_monitor, [ProtocolName, RoleName, ConversationID, MonitorFSM], []).

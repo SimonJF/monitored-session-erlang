@@ -7,7 +7,9 @@
                       actor_type_name, % Name of the attached actor type
                       active_protocols, % [{ProtocolName, RoleName, ConversationID}]
                       protocol_role_map, % Protocol Name |-> [Role]
-                      registered_become_conversations % Atom |-> Conversation
+                      registered_become_conversations, % Atom |-> Conversation
+                      queued_messages % Message ref |-> Message tuple
+                                      % Used for 2-phase commit
                     }).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -49,7 +51,8 @@ fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap) ->
               actor_type_name=ActorTypeName, % Name of the attached actor type
               active_protocols=orddict:new(),
               protocol_role_map=ProtocolRoleMap, % Roles for each protocol
-              registered_become_conversations=orddict:new()
+              registered_become_conversations=orddict:new(),
+              queued_messages=orddict:new()
              }.
 
 load_monitors([], MonitorDict, _) ->
@@ -247,6 +250,24 @@ handle_call(Msg, From, State) ->
 %  handle_incoming_message(MessageData, ProtocolName, RoleName, ConversationID, State);
 handle_cast({conversation_ended, CID, Reason}, State) ->
   handle_conversation_ended(CID, Reason, State);
+handle_cast({queue_msg, ProtocolName, RoleName, ConvID, Msg}, State) ->
+  MsgRef = message:message_id(Msg),
+  QueuedMsgs = State#proxy_state.queued_messages,
+  NewQueuedMsgs = orddict:store(MsgRef, {ProtocolName, RoleName,
+                                         ConvID, Msg}, QueuedMsgs),
+  {noreply, State#proxy_state{queued_messages=NewQueuedMsgs}};
+handle_cast({deliver_msg, MsgRef}, State) ->
+  ActorPid = State#proxy_state.actor_pid,
+  QueuedMsgs = State#proxy_state.queued_messages,
+  {ProtocolName, RoleName, ConvID, Msg} = orddict:fetch(MsgRef, QueuedMsgs),
+  % Deliver the message, and remove from queue
+  ssa_gen_server:message(ActorPid, ProtocolName, RoleName, ConvID, Msg),
+  NewQueuedMsgs = orddict:erase(MsgRef, QueuedMsgs),
+  {noreply, State#proxy_state{queued_messages=NewQueuedMsgs}};
+handle_cast({drop_msg, MsgRef}, State) ->
+  QueuedMsgs = State#proxy_state.queued_messages,
+  NewQueuedMsgs = orddict:erase(MsgRef, QueuedMsgs),
+  {noreply, State#proxy_state{queued_messages=NewQueuedMsgs}};
 handle_cast(Other, State) ->
   ActorPid = State#proxy_state.actor_pid,
   gen_server2:cast(ActorPid, Other),
@@ -269,8 +290,14 @@ code_change(_Old, State, _Extra) ->
 %% API Functions %%
 %%%%%%%%%%%%%%%%%%%
 
-deliver_message(ProxyPID, ProtocolName, RoleName, ConvID, Msg) ->
-  gen_server2:cast(ProxyPID, {message, ProtocolName, RoleName, ConvID, Msg}).
+queue_message(ProxyPID, ProtocolName, RoleName, ConvID, Msg) ->
+  gen_server2:cast(ProxyPID, {queue_msg, ProtocolName, RoleName, ConvID, Msg}).
+
+deliver_message(ProxyPID, MsgRef) ->
+  gen_server2:cast(ProxyPID, {deliver_msg, MsgRef}).
+
+drop_message(ProxyPID, MsgRef) ->
+  gen_server2:cast(ProxyPID, {drop_msg, MsgRef}).
 
 register_become(ProxyPID, RegAtom, ProtocolName, RoleName, ConvID) ->
   gen_server2:call(ProxyPID, {register_become, RegAtom, ProtocolName, RoleName, ConvID}).

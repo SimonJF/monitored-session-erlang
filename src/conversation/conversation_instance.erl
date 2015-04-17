@@ -39,28 +39,41 @@ is_a_node(Node) ->
   Node =/= nonode@nohost.
 
 
-% TODO: This will need to change in order to properly implement failure
-% handling, as the architecture has changed since this was written.
+% TODO: This wil%l need to change in order to properly implement failure
+%% handling, as the architecture has changed since this was written.
+%get_endpoints([], _RoleMap) -> {ok, []};
+%get_endpoints([Role|Roles], RoleMap) ->
+  %case orddict:find(Role, RoleMap) of
+    %{ok, Endpoint} ->
+      %RemoteAlive = (is_a_node(node()) and is_a_node(node(Endpoint))),
+      %LocalAlive = (catch is_process_alive(Endpoint)),
+      %ProcessAlive = (RemoteAlive or (LocalAlive == true)),
+      %if ProcessAlive ->
+           %case get_endpoints(Roles, RoleMap) of
+             %{ok, Endpoints} ->
+               %{ok, [{Role, Endpoint}|Endpoints]};
+             %Err -> Err
+           %end;
+         %not ProcessAlive ->
+           %{error, endpoint_terminated, Role}
+      %end;
+    %error ->
+      %{error, role_not_found, Role}
+  %end.
+
+
 get_endpoints([], _RoleMap) -> {ok, []};
 get_endpoints([Role|Roles], RoleMap) ->
   case orddict:find(Role, RoleMap) of
     {ok, Endpoint} ->
-      RemoteAlive = (is_a_node(node()) and is_a_node(node(Endpoint))),
-      LocalAlive = (catch is_process_alive(Endpoint)),
-      ProcessAlive = (RemoteAlive or (LocalAlive == true)),
-      if ProcessAlive ->
-           case get_endpoints(Roles, RoleMap) of
-             {ok, Endpoints} ->
-               {ok, [{Role, Endpoint}|Endpoints]};
-             Err -> Err
-           end;
-         not ProcessAlive ->
-           {error, endpoint_terminated, Role}
+      case get_endpoints(Roles, RoleMap) of
+        {ok, Endpoints} ->
+          {ok, [{Role, Endpoint}|Endpoints]};
+        Err -> Err
       end;
     error ->
       {error, role_not_found, Role}
   end.
-
 
 %%% Handles an outgoing message, by monitoring and sending to the conversation
 %%% instance for routing if all is well.
@@ -79,14 +92,19 @@ handle_outgoing_message(RoleName, Recipients, MessageName, Types, Payload, State
 
 % Lookup the destination role, and forward to its monitor.
 route_message(Msg, State) ->
-  io:format("Message data: ~p~n", [Msg]),
   Recipients = message:message_recipients(Msg),
   RoleMap = State#conv_inst_state.role_monitor_mapping,
   % Lookup the endpoint for each recipient and deliver
   case get_endpoints(Recipients, RoleMap) of
     {ok, Endpoints} ->
+      % TODO: Add failure handling here
       lists:foreach(fun({_DestRole, Endpoint}) ->
                         role_monitor:receive_message(Endpoint, Msg),
+                        ok
+                    end, Endpoints),
+      lists:foreach(fun({_DestRole, Endpoint}) ->
+                        role_monitor:commit_message(Endpoint,
+                                                    message:message_id(Msg)),
                         ok
                     end, Endpoints),
       {reply, ok, State};
