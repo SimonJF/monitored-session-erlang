@@ -71,7 +71,6 @@ invite_actors(ConversationID, InitiatorRole, InitiatorPID, State) ->
                                           true -> false
                                        end
                                    end, Roles),
-      io:format("Filtered roles: ~p~n", [FilteredRoles]),
       invite_actors_inner(FilteredRoles, ConversationID, State);
       % TODO: Check for error, broadcast error if so.
       % {reply, Res2, State};
@@ -94,8 +93,6 @@ invite_actor_role(RoleName, ConversationID, State) ->
   ProtocolName = protocol_name(State),
   RoleActorMapping = State#protocol_state.role_actor_mapping,
   ActorTypeRes = orddict:find(RoleName, RoleActorMapping),
-  io:format("Trying to find role ~s in Role->Actor map for protocol ~p~n",
-            [RoleName, ProtocolName]),
   case ActorTypeRes of
     % Okay, so, explanation for this I guess.
     % We really want to lift the restriction that only one type of actor

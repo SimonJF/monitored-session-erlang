@@ -121,8 +121,6 @@ check_conversation_setup_complete(State) ->
                         Res = V =/= not_filled,
                         Res and A end, true, RoleMapping),
   % If it is complete, broadcast the conv setup complete message
-  io:format("Setup complete? ~p; Already setup? ~p; RoleMapping: ~p~n",
-            [SetupComplete, AlreadySetup, RoleMapping]),
   if not AlreadySetup andalso SetupComplete ->
       broadcast_conv_setup(State),
       State#conv_inst_state{setup_complete_broadcast=true};
@@ -196,7 +194,6 @@ handle_end_conversation(Reason, State) ->
 spawn_monitors_inner([], _PN, State, MonitorDict) ->
   {true, State#conv_inst_state{role_monitor_mapping=MonitorDict}};
 spawn_monitors_inner([{RoleName, Monitor}|Ms], ProtocolName, State, MonitorDict) ->
- % io:format("Wtf is M, then? ~p~n", [M]),
   SpawnRes = role_monitor:start_link(ProtocolName, RoleName, self(), Monitor),
   case SpawnRes of
     {ok, Pid} ->
