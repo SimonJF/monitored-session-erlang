@@ -38,30 +38,6 @@ conversation_info(Format, Args, State) ->
 is_a_node(Node) ->
   Node =/= nonode@nohost.
 
-
-% TODO: This wil%l need to change in order to properly implement failure
-%% handling, as the architecture has changed since this was written.
-%get_endpoints([], _RoleMap) -> {ok, []};
-%get_endpoints([Role|Roles], RoleMap) ->
-  %case orddict:find(Role, RoleMap) of
-    %{ok, Endpoint} ->
-      %RemoteAlive = (is_a_node(node()) and is_a_node(node(Endpoint))),
-      %LocalAlive = (catch is_process_alive(Endpoint)),
-      %ProcessAlive = (RemoteAlive or (LocalAlive == true)),
-      %if ProcessAlive ->
-           %case get_endpoints(Roles, RoleMap) of
-             %{ok, Endpoints} ->
-               %{ok, [{Role, Endpoint}|Endpoints]};
-             %Err -> Err
-           %end;
-         %not ProcessAlive ->
-           %{error, endpoint_terminated, Role}
-      %end;
-    %error ->
-      %{error, role_not_found, Role}
-  %end.
-
-
 get_endpoints([], _RoleMap) -> {ok, []};
 get_endpoints([Role|Roles], RoleMap) ->
   case orddict:find(Role, RoleMap) of
@@ -93,23 +69,74 @@ handle_outgoing_message(RoleName, Recipients, MessageName, Types, Payload, State
 % Lookup the destination role, and forward to its monitor.
 route_message(Msg, State) ->
   Recipients = message:message_recipients(Msg),
+  MsgID = message:message_id(Msg),
   RoleMap = State#conv_inst_state.role_monitor_mapping,
   % Lookup the endpoint for each recipient and deliver
   case get_endpoints(Recipients, RoleMap) of
     {ok, Endpoints} ->
-      % TODO: Add failure handling here
-      lists:foreach(fun({_DestRole, Endpoint}) ->
-                        role_monitor:receive_message(Endpoint, Msg),
-                        ok
-                    end, Endpoints),
-      lists:foreach(fun({_DestRole, Endpoint}) ->
-                        role_monitor:commit_message(Endpoint,
-                                                    message:message_id(Msg)),
-                        ok
-                    end, Endpoints),
-      {reply, ok, State};
+      % Firstly, send messages to all monitors, which will queue everything.
+      {_Succeeded, _Failed} = check_and_queue_messages(Endpoints, Msg),
+      % Next, check what's alive and what's dead
+      {Alive, Dead} = check_alive(Endpoints),
+      DeadLen = length(Dead),
+      % If all nodes are alive, then commit them
+      if DeadLen == 0 ->
+           commit_messages(Endpoints, MsgID),
+           {reply, ok, State};
+         DeadLen =/= 0 ->
+           % Do clever stuff
+           handle_failure(Alive, Dead, MsgID, State),
+           {reply, ok, State}
+      end;
     Err -> {reply, Err, State}
   end.
+
+
+% Failure detection.
+% Ping each endpoint to ascertain which are up, and which aren't
+check_alive(Endpoints) ->
+  check_alive_inner(Endpoints, [], []).
+
+check_alive_inner([], Alive, Dead) ->
+  {Alive, Dead};
+check_alive_inner([EP|EPs], Alive, Dead) ->
+  {_Role, Pid} = EP,
+  AliveRes = role_monitor:is_actor_alive(Pid),
+  if AliveRes ->
+       check_alive_inner(EPs, [EP|Alive], Dead);
+     not AliveRes ->
+       check_alive_inner(EPs, Alive, [EP, Dead])
+  end.
+
+handle_failure(_Alive, _Dead, _MsgID, _State) ->
+  % OK, maybe not so clever at the moment...
+  error_logger:error_msg("Oops, some nodes were down.~n"),
+  conversation_instance:end_conversation(self(), failed_multicast).
+
+
+
+% Monitor and queue messages.
+% Generally at the moment the monitor will succeed -- but when I add
+% assertions in, they might fail.
+check_and_queue_messages(Endpoints, Msg) ->
+  check_and_queue_messages_inner(Endpoints, Msg, [], []).
+
+check_and_queue_messages_inner([], _, Succeeded, Failed) ->
+  {Succeeded, Failed};
+check_and_queue_messages_inner([EP|EPs], Msg, Succeeded, Failed) ->
+  {_Role, Pid} = EP,
+  MonitorRes = role_monitor:receive_message(Pid, Msg),
+  if MonitorRes == ok ->
+       check_and_queue_messages_inner(EPs, Msg, [EP|Succeeded], Failed);
+     MonitorRes =/= ok ->
+       check_and_queue_messages_inner(EPs, Msg, Succeeded, [EP|Failed])
+  end.
+
+% All messages are delivered: commit.
+commit_messages(Endpoints, MessageID) ->
+  lists:foreach(fun({_DestRole, Endpoint}) ->
+                    role_monitor:commit_message(Endpoint, MessageID),
+                    ok end, Endpoints).
 
 % Checks whether the conversation is complete, and sends out
 % "complete" messages if so

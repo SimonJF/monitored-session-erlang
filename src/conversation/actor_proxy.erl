@@ -336,3 +336,10 @@ start_link(ActorPID, Module, ProtocolRoleMap) ->
 start_link(RegName, ActorPID, Module, ProtocolRoleMap) ->
   gen_server2:start_link(RegName, actor_proxy,
                          [ActorPID, Module, ProtocolRoleMap], []).
+
+
+% Checks whether the actor proxy for the given ID (and therefore the actor
+% instance) is alive.
+is_actor_alive(ProxyPID) ->
+  rpc:pinfo(ProxyPID) =/= undefined.
+

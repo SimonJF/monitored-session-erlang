@@ -75,8 +75,7 @@ handle_incoming_message(MessageData, State) ->
 %%% instance for routing if all is well.
 handle_outgoing_message(Message, State) ->
   % Construct a message instance, send to the monitor, and check the result
-  Role = State#role_monitor_state.role_name,
-  MonitorRes = monitor_msg(send, Message, State).
+  monitor_msg(send, Message, State).
 
 % Performs the actual monitoring.
 monitor_msg(CommType, MessageData, State) ->
@@ -138,7 +137,11 @@ handle_call({receive_ssa_message, Msg}, _From, State) ->
 handle_call({set_actor_pid, Pid}, _From, State) ->
   % Change the actor ID.
   NewState = State#role_monitor_state{actor_pid=Pid},
-  {reply, ok, NewState}.
+  {reply, ok, NewState};
+handle_call(is_actor_alive, _From, State) ->
+  ActorPID = State#role_monitor_state.actor_pid,
+  Res = actor_proxy:is_actor_alive(ActorPID),
+  {reply, Res, State}.
 
 handle_cast(conversation_success, State) ->
   EndedFun =
@@ -204,3 +207,5 @@ conversation_ended(MonitorPID, Reason) ->
 conversation_success(MonitorPID, CID) ->
   gen_server2:cast(MonitorPID, conversation_success).
 
+is_actor_alive(MonitorPID) ->
+  gen_server2:call(MonitorPID, is_actor_alive).
