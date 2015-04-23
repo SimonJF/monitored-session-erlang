@@ -1,3 +1,8 @@
+(Note to anyone unfortunate enough to be reading this: this is an
+unstrucutred brain-dump of thoughts I've had while thinking about how
+session types interact with Erlang's supervision method. Here be
+dragons. Don't judge me.)
+
 # Failure Handling
 
 The fact we've got abstract roles and concrete participants, coupled
@@ -124,3 +129,89 @@ unsuccessful. What do we do at this point?
         back in the wrong place.
   * Kill the conversation.
   * Delegate to another actor which can decide what to do at this point.
+
+
+## When is it safe to re-populate a role?
+This is an important question. Let us consider, abstractly, the state of
+an actor prior to handling a message:
+
+  * A queue of (checked) messages to be processed
+  * A monitor consistent with the queue of checked messages
+  * User actor state
+  * (Proposed) per-conversation-role state
+
+We can treat user actor state as orthogonal. If the user wants to
+share state between actors, then they should replace it in the standard
+Erlang ways (think reloading from error kernels, etc). Conversation-role
+state needs to be preserved, however.
+
+Now, we must consider the points at which a process may die.
+  * **Case 1** When not handling a message, for example due to a node
+    going offline, or a one_for_all restart by a supervisor
+  * **Case 2** During the handling of a message, prior to any messages
+    being sent
+  * **Case 3** During the handling of a message, after sending other
+    messages
+
+Now, how do we handle each case?
+
+### Case 1 (Not during handler)
+This is the simplest case. If something is idle, it is not in the middle
+of processing any messages (and, most likely, won't have any in its
+queue either).
+
+In this case, we can simply "switch out" the actor -- we invite
+something else to fulfil the role, and resend the messages in the queue
+(but 99.999% of the time there won't be any).
+
+### Case 2 (During handler, nothing sent yet)
+The second case isn't too much worse. In this case, we will need to
+migrate the monitor, and re-send the messsage which was previously sent
+in order to re-trigger the handler, as well as any queued messages.
+
+### Case 3 (During handler, some messages sent)
+This is a lot more difficult, because it essentially means that control
+must resume from the point at which the last message was sent.
+
+I'm in two minds about this. One the one hand, we could just say that
+this is unrecoverable, and abort the conversation.
+
+On the other, we'd have to consider how to proceed. Of course, the
+monitor state will be at the correct point, guaranteeing session
+fidelity, but we need to ensure we'd come back in (at a sub-handler
+level) at the correct place. This is Hard To Do.
+
+For now, I think I'm going to say that we'll count this as
+un-recoverable, at least until we have the basic infrastructure set up.
+
+## Implementation
+
+So, I'm going to treat this bit as a to-do list-y thing.
+
+We need some way of keeping track of the state of a role in a session.
+
+State ::= Idle | HandlerStarted | MessageSent
+
+Idle: Either no handlers have run, or a handler has successfully run and
+saved all state, etc.
+
+HandlerStarted: The handler is "in action" (tell me if for some reason
+you're reading this and you get the joke, and I'll buy you a pint), but
+hasn't yet sent a message.
+
+MessageSent: The handler is "in action", but a message has been sent,
+meaning that the monitor has advanced.
+
+We need to keep track of *all messages which have been processed by the
+monitor but not yet processed by the actor*. We queue messages when they
+have been processed by the monitor, and dequeue them when they have been
+completely processed by the handler. I want to say to keep this on the
+role\_monitor, but it might be necessary to keep it on a separate
+process bidirectionally linked to the monitor. We'll see.
+
+Todo tomorrow:
+  * Extend role\_monitors with role state
+  * Modify callbacks in ssa\_gen\_server to save role state
+  * Recording and detection of state within the handler (ie Idle / HS /
+    MS)
+  * (Possibly, if time?) work on first pass of implementing this.

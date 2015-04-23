@@ -26,6 +26,11 @@ send(ConvKey, Recipients, MessageName, Types, Payload) ->
 
 % Used to transition to another role.
 become({_, _, _, ProxyPID}, RegAtom, RoleName, Operation, Arguments) ->
+  do_become(ProxyPID, RegAtom, RoleName, Operation, Arguments);
+become(ProxyPID, RegAtom, RoleName, Operation, Arguments) ->
+  do_become(ProxyPID, RegAtom, RoleName, Operation, Arguments).
+
+do_become(ProxyPID, RegAtom, RoleName, Operation, Arguments) ->
   actor_proxy:become(ProxyPID, RegAtom, RoleName, Operation, Arguments).
 
 register_conversation(RegAtom, {ProtocolName, RoleName, ConvID, ProxyPID}) ->

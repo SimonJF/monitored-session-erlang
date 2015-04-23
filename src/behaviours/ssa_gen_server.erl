@@ -24,7 +24,13 @@
 
 
 % ssactor_init returns some state given some input args
-% ssactor_handle_message handles a message
+% ssactor_handle_message handles a message.
+%   Return values:
+%    {ok, NewUserState}
+%    {ok, NewUserState, NewConvState}
+%    {stop, Reason, NewUserState}
+%    {stop, Reason, NewUserState, NewConvState}
+%
 % ssactor_join is called when the actor is invited to participate in a
 %   conversation. The user can decide to accept or decline this invitation.
 % ssactor_conversation_established is called when all actors have been invited.
@@ -172,8 +178,6 @@ handle_cast({ssa_msg, Protocol, Role, ConversationID, MsgData}, State) ->
   Payload = message:message_payload(MsgData),
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
-  % TODO: ssactor_handle_message currently just returns a new state.
-  % Should we have some more complex callback here instead?
   NewUserState = Module:ssactor_handle_message(
                    Protocol, Role, ConversationID, Sender, Op, Payload, UserState,
                    {Protocol, Role, ConversationID, State#actor_state.proxy_pid}),
@@ -238,7 +242,20 @@ unwrap_start_result({ok, ActorPid}) ->
   {ok, ProxyPID};
 unwrap_start_result(Other) -> Other.
 
-% Public API
+
+%%%%%%%%%%%%%%%%%%%%%%
+%%%% Internal API %%%%
+%%%%%%%%%%%%%%%%%%%%%%
+conversation_ended(ActorPID, CID, Reason) ->
+  gen_server2:cast(ActorPID, {conversation_ended, CID, Reason}).
+
+message(ActorPID, ProtocolName, RoleName, ConvID, Msg) ->
+  gen_server2:cast(ActorPID, {ssa_msg, ProtocolName, RoleName, ConvID, Msg}).
+
+
+%%%%%%%%%%%%%%%%%%%%%%
+%%%%  Public  API %%%%
+%%%%%%%%%%%%%%%%%%%%%%
 
 start(ModuleName, Args, Options) ->
   Res = gen_server2:start(ssa_gen_server, [ModuleName, Args], Options),
@@ -268,15 +285,4 @@ cast(ServerRef, Message) ->
 
 reply(ServerRef, Message) ->
   gen_server2:reply(ServerRef, Message).
-
-
-%%%%%%%%%%%%%
-%%%% API %%%%
-%%%%%%%%%%%%%
-conversation_ended(ActorPID, CID, Reason) ->
-  gen_server2:cast(ActorPID, {conversation_ended, CID, Reason}).
-
-message(ActorPID, ProtocolName, RoleName, ConvID, Msg) ->
-  gen_server2:cast(ActorPID, {ssa_msg, ProtocolName, RoleName, ConvID, Msg}).
-
 

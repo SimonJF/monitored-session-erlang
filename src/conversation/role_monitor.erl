@@ -204,7 +204,7 @@ start_link(ProtocolName, RoleName, ConversationID, MonitorFSM) ->
 conversation_ended(MonitorPID, Reason) ->
   gen_server2:cast(MonitorPID, {conversation_ended, Reason}).
 
-conversation_success(MonitorPID, CID) ->
+conversation_success(MonitorPID, _CID) ->
   gen_server2:cast(MonitorPID, conversation_success).
 
 is_actor_alive(MonitorPID) ->
