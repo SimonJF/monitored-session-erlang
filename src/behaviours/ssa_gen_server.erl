@@ -27,9 +27,9 @@
 % ssactor_handle_message handles a message.
 %   Return values:
 %    {ok, NewUserState}
-%    {ok, NewUserState, NewConvState}
+%    {ok, NewUserState, NewRoleState}
 %    {stop, Reason, NewUserState}
-%    {stop, Reason, NewUserState, NewConvState}
+%    {stop, Reason, NewUserState, NewRoleState}
 %
 % ssactor_join is called when the actor is invited to participate in a
 %   conversation. The user can decide to accept or decline this invitation.
@@ -96,7 +96,6 @@ finish_init(Module, UserArgs, ProxyProcess) ->
     Other ->
       {error, {proxy_start_failed, Other}}
   end.
-
 
 % Delegate calls, casts (other than ssa internal messages), info messages
 % and termination messages to the actor.
@@ -170,7 +169,7 @@ handle_call(Request, From, State) ->
 
 % Handle incoming user messages. These have been checked by the proxy to
 % ensure that they conform to the MPST.
-handle_cast({ssa_msg, Protocol, Role, ConversationID, MsgData}, State) ->
+handle_cast({ssa_msg, MonitorPID, Protocol, Role, ConversationID, MsgData}, State) ->
                    % {message, _, Sender, _, Op, Types, Payload}}, State) ->
   actor_info("Processing message ~p", [MsgData], State),
   Sender = message:message_sender(MsgData),
@@ -178,10 +177,33 @@ handle_cast({ssa_msg, Protocol, Role, ConversationID, MsgData}, State) ->
   Payload = message:message_payload(MsgData),
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
-  NewUserState = Module:ssactor_handle_message(
+  % Notify monitor that we've started processing the message
+  role_monitor:handler_started(MonitorPID),
+  HandleRes = Module:ssactor_handle_message(
                    Protocol, Role, ConversationID, Sender, Op, Payload, UserState,
                    {Protocol, Role, ConversationID, State#actor_state.proxy_pid}),
+  % Save role state, reset handler state to idle, and grab new user state
+  NewUserState =
+    case HandleRes of
+      {ok, NewState} ->
+        role_monitor:handler_finished(MonitorPID),
+        NewState;
+      {ok, NewState, NewRoleState} ->
+        role_monitor:handler_finished(MonitorPID, NewRoleState),
+        NewState;
+      {stop, NewState} ->
+        % TODO: yadayada need to do some stuff to stop here
+        role_monitor:handler_finished(MonitorPID),
+        NewState;
+      {stop, NewState, NewRoleState} ->
+        % As above
+        role_monitor:handler_finished(MonitorPID, NewRoleState),
+        NewState;
+      Other ->
+        exit(bad_return_value)
+    end,
   {noreply, State#actor_state{user_state=NewUserState}};
+
 % Become
 handle_cast(_Msg = {become, Protocol, Role, Operation, Arguments, CID}, State) ->
   Module = State#actor_state.actor_type_name,
@@ -249,8 +271,8 @@ unwrap_start_result(Other) -> Other.
 conversation_ended(ActorPID, CID, Reason) ->
   gen_server2:cast(ActorPID, {conversation_ended, CID, Reason}).
 
-message(ActorPID, ProtocolName, RoleName, ConvID, Msg) ->
-  gen_server2:cast(ActorPID, {ssa_msg, ProtocolName, RoleName, ConvID, Msg}).
+message(ActorPID, MonitorPID, ProtocolName, RoleName, ConvID, Msg) ->
+  gen_server2:cast(ActorPID, {ssa_msg, MonitorPID, ProtocolName, RoleName, ConvID, Msg}).
 
 
 %%%%%%%%%%%%%%%%%%%%%%

@@ -256,12 +256,13 @@ handle_cast({queue_msg, ProtocolName, RoleName, ConvID, Msg}, State) ->
   NewQueuedMsgs = orddict:store(MsgRef, {ProtocolName, RoleName,
                                          ConvID, Msg}, QueuedMsgs),
   {noreply, State#proxy_state{queued_messages=NewQueuedMsgs}};
-handle_cast({deliver_msg, MsgRef}, State) ->
+handle_cast({deliver_msg, MonitorPid, MsgRef}, State) ->
   ActorPid = State#proxy_state.actor_pid,
   QueuedMsgs = State#proxy_state.queued_messages,
   {ProtocolName, RoleName, ConvID, Msg} = orddict:fetch(MsgRef, QueuedMsgs),
   % Deliver the message, and remove from queue
-  ssa_gen_server:message(ActorPid, ProtocolName, RoleName, ConvID, Msg),
+  ssa_gen_server:message(ActorPid, MonitorPid, ProtocolName,
+                         RoleName, ConvID, Msg),
   NewQueuedMsgs = orddict:erase(MsgRef, QueuedMsgs),
   {noreply, State#proxy_state{queued_messages=NewQueuedMsgs}};
 handle_cast({drop_msg, MsgRef}, State) ->
@@ -293,8 +294,8 @@ code_change(_Old, State, _Extra) ->
 queue_message(ProxyPID, ProtocolName, RoleName, ConvID, Msg) ->
   gen_server2:cast(ProxyPID, {queue_msg, ProtocolName, RoleName, ConvID, Msg}).
 
-deliver_message(ProxyPID, MsgRef) ->
-  gen_server2:cast(ProxyPID, {deliver_msg, MsgRef}).
+deliver_message(ProxyPID, MonitorPID, MsgRef) ->
+  gen_server2:cast(ProxyPID, {deliver_msg, MonitorPID, MsgRef}).
 
 drop_message(ProxyPID, MsgRef) ->
   gen_server2:cast(ProxyPID, {drop_msg, MsgRef}).
@@ -336,7 +337,6 @@ start_link(ActorPID, Module, ProtocolRoleMap) ->
 start_link(RegName, ActorPID, Module, ProtocolRoleMap) ->
   gen_server2:start_link(RegName, actor_proxy,
                          [ActorPID, Module, ProtocolRoleMap], []).
-
 
 % Checks whether the actor proxy for the given ID (and therefore the actor
 % instance) is alive.

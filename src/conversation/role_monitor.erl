@@ -9,6 +9,9 @@
                              protocol_name, % Name of the protocol
                              role_name, % Name of the role
                              conversation_id, % PID of the conversation
+                             role_state, % Per-role state, independent of actor
+                             handler_state, % Current state of message handling:
+                                            % Either idle, handler_started, message_sent
                              monitor}). % Monitor FSM
 
 
@@ -47,7 +50,7 @@ queue_incoming_message(Msg, State) ->
 % "Commit" the message, sending it to the program logic
 commit_incoming_message(MsgRef, State) ->
   ActorPID = State#role_monitor_state.actor_pid,
-  actor_proxy:deliver_message(ActorPID, MsgRef).
+  actor_proxy:deliver_message(ActorPID, self(), MsgRef).
 
 % Drop the message from the queue
 drop_incoming_message(MsgRef, State) ->
@@ -94,7 +97,9 @@ monitor_msg(CommType, MessageData, State) ->
       case CommType of
         send ->
           % Return ok, indicating the monitor's fine, and store the new monitor
-          {ok, NewState};
+          % Mark that a message has been sent in this handler
+          NewState1 = NewState#role_monitor_state{handler_state=message_sent},
+          {ok, NewState1};
         recv ->
           queue_incoming_message(MessageData, NewState),
           {ok, NewState}
@@ -112,6 +117,17 @@ with_actor_pid(Fun, State) ->
      true -> {error, undefined_actor_pid}
   end.
 
+set_handler_state_finished(State) ->
+  NewState = State#role_monitor_state{handler_state=idle},
+  {reply, ok, NewState}.
+set_handler_state_finished(State, NewRoleState) ->
+  NewState = State#role_monitor_state{handler_state=idle,
+                                      role_state=NewRoleState},
+  {reply, ok, NewState}.
+
+set_handler_started(State) ->
+  NewState = State#role_monitor_state{handler_state=handler_started},
+  {reply, ok, NewState}.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%% Callbacks
@@ -122,6 +138,7 @@ init([ProtocolName, RoleName, ConversationPid, Monitor]) ->
                               protocol_name=ProtocolName,
                               role_name=RoleName,
                               conversation_id=ConversationPid,
+                              handler_state=idle,
                               monitor=Monitor},
   {ok, State}.
 
@@ -141,7 +158,16 @@ handle_call({set_actor_pid, Pid}, _From, State) ->
 handle_call(is_actor_alive, _From, State) ->
   ActorPID = State#role_monitor_state.actor_pid,
   Res = actor_proxy:is_actor_alive(ActorPID),
-  {reply, Res, State}.
+  {reply, Res, State};
+handle_call(handler_started, _From, State) ->
+  set_handler_started(State);
+handle_call(handler_finished, _From, State) ->
+  set_handler_state_finished(State);
+handle_call({handler_finished, NewRoleState}, _From, State) ->
+  set_handler_state_finished(State, NewRoleState);
+handle_call(Other, _From, State) ->
+  error_logger:warn_msg("Unhandled call in role_monitor ~p: ~p~n", [self(), Other]),
+  {noreply, State}.
 
 handle_cast(conversation_success, State) ->
   EndedFun =
@@ -209,3 +235,12 @@ conversation_success(MonitorPID, _CID) ->
 
 is_actor_alive(MonitorPID) ->
   gen_server2:call(MonitorPID, is_actor_alive).
+
+handler_started(MonitorPID) ->
+  gen_server2:call(MonitorPID, handler_started).
+
+handler_finished(MonitorPID) ->
+  gen_server2:call(MonitorPID, handler_finished).
+
+handler_finished(MonitorPID, NewRoleState) ->
+  gen_server2:call(MonitorPID, {handler_finished, NewRoleState}).
