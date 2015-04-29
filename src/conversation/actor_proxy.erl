@@ -322,16 +322,6 @@ invite({ProtocolName, _, ConversationID, ProxyPID}, InviteeProxyPID, InviteeRole
                                InviteeRoleName, ConversationID,
                                InviteeProxyPID}).
 
-send_message({ProtocolName, RoleName, ConversationID, ProxyPID},
-             Recipients, MessageName, Types, Payload) ->
-  gen_server2:call(ProxyPID,
-                  {send_msg, ProtocolName, RoleName, ConversationID,
-                   Recipients, MessageName, Types, Payload}).
-
-do_call({PN, RN, CID, ProxyPID}, Recipient, MessageName, Types, Payload) ->
-  gen_server2:call(ProxyPID,
-                   {do_call, PN, RN, CID, Recipient, MessageName, Types, Payload}).
-
 % Called by the conversation instance to notify the actor that the conversation has died
 conversation_ended(ProxyPID, CID, Reason) ->
   gen_server2:cast(ProxyPID, {conversation_ended, CID, Reason}).
