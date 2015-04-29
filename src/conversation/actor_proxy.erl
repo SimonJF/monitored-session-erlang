@@ -219,12 +219,10 @@ handle_send_delayed_invite(ProtocolName, RoleName, ConversationID, InviteeMonito
 %  * Termination
 handle_call({invitation, ProtocolName, RoleName, ConversationID}, _Sender, State) ->
   handle_invitation(ProtocolName, RoleName, ConversationID, State);
-handle_call({send_msg, _CurrentProtocol, CurrentRole, ConversationID, Recipients,
-             MessageName, Types, Payload}, _Sender, State) ->
-    % Send to the conversation, which will perform monitoring and send if possible.
-    Reply = conversation_instance:outgoing_message(CurrentRole, ConversationID, Recipients,
-                                                   MessageName, Types, Payload),
-  {reply, Reply, State};
+%handle_call({send_msg, _CurrentProtocol, CurrentRole, ConversationID, Recipients,
+%             MessageName, Types, Payload}, _Sender, State) ->
+%    % Send to the conversation, which will perform monitoring and send if possible.
+%  {reply, Reply, State};
 handle_call({become, RoleName, RegAtom, Operation, Arguments}, _Sender, State) ->
   handle_become(RegAtom, RoleName, Operation, Arguments, State);
 handle_call({send_delayed_invite, ProtocolName, InviteeRoleName, ConversationID, InviteeMonitorPid},
@@ -297,6 +295,10 @@ queue_message(ProxyPID, ProtocolName, RoleName, ConvID, Msg) ->
 deliver_message(ProxyPID, MonitorPID, MsgRef) ->
   gen_server2:cast(ProxyPID, {deliver_msg, MonitorPID, MsgRef}).
 
+% Called from conversation_instance to make a synchronous call.
+% make_call(ProxyPID, MonitorPID, ProtocolName, RoleName, ConvID, Msg) ->
+%  gen_server2:cast(ProxyPID, {
+
 drop_message(ProxyPID, MsgRef) ->
   gen_server2:cast(ProxyPID, {drop_msg, MsgRef}).
 
@@ -325,6 +327,10 @@ send_message({ProtocolName, RoleName, ConversationID, ProxyPID},
   gen_server2:call(ProxyPID,
                   {send_msg, ProtocolName, RoleName, ConversationID,
                    Recipients, MessageName, Types, Payload}).
+
+do_call({PN, RN, CID, ProxyPID}, Recipient, MessageName, Types, Payload) ->
+  gen_server2:call(ProxyPID,
+                   {do_call, PN, RN, CID, Recipient, MessageName, Types, Payload}).
 
 % Called by the conversation instance to notify the actor that the conversation has died
 conversation_ended(ProxyPID, CID, Reason) ->

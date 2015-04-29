@@ -16,9 +16,9 @@ initialise(SpecDir, Config) ->
 teardown() ->
   conversation_runtime_sup:teardown().
 
-send(ConvKey, Recipients, MessageName, Types, Payload) ->
-  Res = actor_proxy:send_message(ConvKey, Recipients, MessageName, Types,
-                                 Payload),
+send({Protocol, Role, ConvID, _PPID}, Recipients, MessageName, Types, Payload) ->
+  Res = conversation_instance:outgoing_message(Role, ConvID, Recipients,
+                                               MessageName, Types, Payload),
   case Res of
     ok -> ok;
     Err -> error(Err)
