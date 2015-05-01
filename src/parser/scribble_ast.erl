@@ -168,3 +168,17 @@ local_interruptible(ScopeName, InterruptibleBlock, LocalThrow, LocalCatches) ->
 
 local_invites(Invitee, Interactions) ->
   {local_invites, Invitee, Interactions}.
+
+
+local_call_request_send(MessageSignature, Recipient) ->
+  {local_call_request_send, MessageSignature, Recipient}.
+
+local_call_request_recv(MessageSignature, Recipient) ->
+  {local_call_request_recv, MessageSignature, Recipient}.
+
+local_call_response_send(MessageSignature, Sender) ->
+  {local_call_response_send, MessageSignature, Sender}.
+
+local_call_response_recv(MessageSignature, Sender) ->
+  {local_call_response_recv, MessageSignature, Sender}.
+

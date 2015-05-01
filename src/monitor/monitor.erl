@@ -139,7 +139,11 @@ next_node(InteractionType, Message, MonitorNode = {NodeTy, _Id, _Info}, MonitorI
   {NodeType, PredicateFunction} =
     case InteractionType of
       send -> {send_node, fun monitor:can_send_at/3};
-      recv -> {receive_node, fun monitor:can_receive_at/3}
+      recv -> {receive_node, fun monitor:can_receive_at/3};
+      send_call_req -> {call_request_send_node, fun monitor:can_send_request_at/3};
+      recv_call_req -> {call_request_recv_node, fun monitor:can_receive_request_at/3};
+      send_call_resp -> {call_response_send_node, fun monitor:can_send_response_at/3};
+      recv_call_resp -> {call_response_recv_node, fun monitor:can_receive_response_at/3}
     end,
   FilteredTransitions = filter_outgoing_transitions(InteractionType,
                                                     NodeType,
@@ -148,22 +152,30 @@ next_node(InteractionType, Message, MonitorNode = {NodeTy, _Id, _Info}, MonitorI
                                                     PredicateFunction,
                                                     MonitorInstance),
   check_transition_list(FilteredTransitions);
-next_node(recv, Message, MonitorNode, MonitorInstance) ->
-  transition_next_node(Message,
-                       MonitorNode,
-                       can_receive_at(Message, MonitorNode, MonitorInstance),
-                       MonitorInstance);
-next_node(send, Message, MonitorNode, MonitorInstance) ->
-  transition_next_node(Message,
-                       MonitorNode,
-                       can_send_at(Message, MonitorNode, MonitorInstance),
-                       MonitorInstance);
-next_node(_IT, _Msg, _MN, _MI) ->
-  {error, bad_node}.
+next_node(InteractionType, Message, MonitorNode, MonitorInstance) ->
+  MonitorFn =
+    case InteractionType of
+      send -> fun monitor:can_send_at/3;
+      recv -> fun monitor:can_receive_at/3;
+      send_call_req -> fun monitor:can_send_request_at/3;
+      recv_call_req -> fun monitor:can_receive_request_at/3;
+      send_call_resp -> fun monitor:can_send_response_at/3;
+      recv_call_resp -> fun monitor:can_receive_response_at/3;
+      _Other -> none
+    end,
+  if MonitorFn =/= none ->
+    transition_next_node(Message,
+                         MonitorNode,
+                         MonitorFn(Message, MonitorNode, MonitorInstance),
+                         MonitorInstance);
+    MonitorFn == none ->
+       {error, bad_node}
+  end.
+
 
 % Checks whether we can send or receive at this point
-can_receive_at(Message, {receive_node, _Id, Info}, _MonitorInstance) ->
-  {Sender, MessageName, PayloadTypes} = Info,
+% Checking a call response and a receive have identical logic.
+check_receive(Message, Sender, MessageName, PayloadTypes) ->
   CorrectSender = message:message_sender(Message) == Sender,
   CorrectMessageName = message:message_name(Message) == MessageName,
   CorrectPayloadTypes = message:message_payload_types(Message) == PayloadTypes,
@@ -172,14 +184,36 @@ can_receive_at(Message, {receive_node, _Id, Info}, _MonitorInstance) ->
     {false, _, _} -> {false, bad_sender};
     {_, false, _} -> {false, bad_message_name};
     {_, _, false} -> {false, bad_payload_types}
-  end;
-can_receive_at(_Message, MonitorNode, _MonitorInstance) ->
-  io:format("Bad node type: ~p~n", [MonitorNode]),
+  end.
+
+can_receive_at(Message, {receive_node, _Id, Info}, _MonitorInstance) ->
+  {Sender, MessageName, PayloadTypes} = Info,
+  check_receive(Message, Sender, MessageName, PayloadTypes);
+can_receive_at(Message, _MonitorNode, _MonitorInstance) ->
+  error_logger:error_msg("Monitor rejected message ~p: expected to receive~n",
+                        [Message]),
   {false, bad_node_type}.
 
 
-can_send_at(Message, {send_node, _Id, Info}, _MonitorInstance) ->
-  {Recipients, MessageName, PayloadTypes} = Info,
+can_receive_request_at(Message, {call_request_recv_node, _Id, Info}, _MonitorInstance) ->
+  {Recipient, MessageName, PayloadTypes} = Info,
+  check_receive(Message, [Recipient], MessageName, PayloadTypes);
+can_receive_request_at(Message, _MonitorNode, _MonitorInstance) ->
+  error_logger:error_msg("Monitor rejected message ~p:" ++
+                         " expected to receive a call request~n", [Message]),
+  {false, bad_node_type}.
+
+
+can_receive_response_at(Message, {call_response_recv_node, _Id, Info}, _MI) ->
+  {Sender, MessageName, PayloadType} = Info,
+  check_receive(Message, Sender, MessageName, [PayloadType]);
+can_receive_response_at(Message, _MonitorNode, _MonitorInstance) ->
+  error_logger:eror_msg("Monitor rejected message ~p: expected to receive" ++
+                        "a call response~n", [Message]),
+  {false, bad_node_type}.
+
+% Checking a send and a call request share the same logic.
+check_send(Message, Recipients, MessageName, PayloadTypes) ->
   CorrectRecipients = lists:sort(Recipients) == lists:sort(message:message_recipients(Message)),
   CorrectMessageName = message:message_name(Message) == MessageName,
   CorrectPayloadTypes = message:message_payload_types(Message) == PayloadTypes,
@@ -188,10 +222,31 @@ can_send_at(Message, {send_node, _Id, Info}, _MonitorInstance) ->
     {false, _, _} -> {false, bad_recipients};
     {_, false, _} -> {false, bad_message_name};
     {_, _, false} -> {false, bad_payload_types}
-  end;
-can_send_at(_Message, MonitorNode, _MonitorInstance) ->
-  io:format("Bad node type: ~p~n", [MonitorNode]),
+  end.
+
+can_send_at(Message, {send_node, _Id, Info}, _MonitorInstance) ->
+  {Recipients, MessageName, PayloadTypes} = Info,
+  check_send(Message, Recipients, MessageName, PayloadTypes);
+can_send_at(Message, _MonitorNode, _MonitorInstance) ->
+  error_logger:error_msg("Monitor rejected message ~p: expected to send~n", [Message]),
   {false, bad_node_type}.
+
+can_send_request_at(Message, {call_request_send_node, _Id, Info}, _MonitorInstance) ->
+  {Recipient, MessageName, PayloadTypes} = Info,
+  check_send(Message, [Recipient], MessageName, PayloadTypes);
+can_send_request_at(Message, _MonitorNode, _MonitorInstance) ->
+  error_logger:error_msg("Monitor rejected message ~p:" ++
+                         " expected to send a call request~n", [Message]),
+  {false, bad_node_type}.
+
+can_send_response_at(Message, {call_response_send_node, _Id, Info}, _MonitorInstance) ->
+  {Recipient, MessageName, PayloadTypes} = Info,
+  check_send(Message, [Recipient], MessageName, PayloadTypes);
+can_send_response_at(Message, _MonitorNode, _MonitorInstance) ->
+  error_logger:error_msg("Monitor rejected message ~p:" ++
+                         " expected to send a call response~n", [Message]),
+  {false, bad_node_type}.
+
 
 
 % Checks a message given an interaction type, message, and monitor instance
@@ -223,6 +278,18 @@ send(Message, MonitorInstance) ->
 % and advance the monitor state
 recv(Message, MonitorInstance) ->
   check_message(recv, Message, MonitorInstance).
+
+send_call_request(Message, MonitorInstance) ->
+  check_message(send_call_req, Message, MonitorInstance).
+recv_call_request(Message, MonitorInstance) ->
+  check_message(recv_call_req, Message, MonitorInstance).
+send_call_response(Message, MonitorInstance) ->
+  check_message(send_call_resp, Message, MonitorInstance).
+recv_call_response(Message, MonitorInstance) ->
+  check_message(recv_call_resp, Message, MonitorInstance).
+
+call_response(Message, MonitorInstance) ->
+  check_message(call_resp, Message, MonitorInstance).
 
 role_name(MonitorInstance) ->
   MonitorInstance#monitor_instance.role_name.

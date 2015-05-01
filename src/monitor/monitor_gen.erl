@@ -25,6 +25,27 @@ send_node(Id, {local_send, MessageSig, Recipients}) ->
   Info = {Recipients, MessageName, PayloadTypes},
   make_node(send_node, Id, Info).
 
+
+call_request_send_node(Id, {local_call_request_send, MessageSig, Recipient}) ->
+  {message_signature, MessageName, PayloadTypes} = MessageSig,
+  Info = {Recipient, MessageName, PayloadTypes},
+  make_node(call_request_send_node, Id, Info).
+
+call_request_recv_node(Id, {local_call_request_recv, MessageSig, Sender}) ->
+  {message_signature, MessageName, PayloadTypes} = MessageSig,
+  Info = {Sender, MessageName, PayloadTypes},
+  make_node(call_request_recv_node, Id, Info).
+
+call_response_send_node(Id, {local_call_response_send, MessageSig, Recipient}) ->
+  {message_signature, MessageName, PayloadTypes} = MessageSig,
+  Info = {Recipient, MessageName, PayloadTypes},
+  make_node(call_response_send_node, Id, Info).
+
+call_response_recv_node(Id, {local_call_response_recv, MessageSig, Sender}) ->
+  {message_signature, MessageName, PayloadTypes} = MessageSig,
+  Info = {Sender, MessageName, PayloadTypes},
+  make_node(call_response_recv_node, Id, Info).
+
 choice_node(Id, _Choice) ->
   make_node(choice_node, Id, {}).
 
@@ -49,6 +70,10 @@ block_size([X|XS]) -> instruction_size(X) + block_size(XS).
 
 instruction_size({local_send, _, _}) -> 1;
 instruction_size({local_receive, _, _}) -> 1;
+instruction_size({local_call_request_send, _, _}) -> 1;
+instruction_size({local_call_request_recv, _, _}) -> 1;
+instruction_size({local_call_response_send, _, _}) -> 1;
+instruction_size({local_call_response_recv, _, _}) -> 1;
 instruction_size({choice, _, Choices}) ->
   1 + lists:foldl(fun(ChoiceBlock, Sum) -> Sum + block_size(ChoiceBlock) end, 0, Choices);
 instruction_size({rec, _, Block}) -> 1 + block_size(Block);
@@ -69,6 +94,10 @@ instruction_size({local_invites, _, InvitesBlock}) -> block_size(InvitesBlock).
 
 node_type({local_send, _, _}) -> simple_transition;
 node_type({local_receive, _, _}) -> simple_transition;
+node_type({local_call_request_send, _, _}) -> simple_transition;
+node_type({local_call_request_recv, _, _}) -> simple_transition;
+node_type({local_call_response_send, _, _}) -> simple_transition;
+node_type({local_call_response_recv, _, _}) -> simple_transition;
 node_type({choice, _, _}) -> new_scope;
 node_type({rec, _, _}) -> new_scope;
 node_type({parallel, _}) -> new_scope;
@@ -276,6 +305,18 @@ generate_node(LocalRecv = {local_receive, _, _}, RunningID, States, Transitions)
 generate_node(LocalSend = {local_send, _, _}, RunningID, States, Transitions) ->
   SendNode = send_node(RunningID, LocalSend),
   add_node(RunningID, SendNode, States, Transitions);
+generate_node(LocalSendCallReq= {local_call_request_send, _, _}, RunningID, States, Transitions) ->
+  SendReqNode = call_request_send_node(RunningID, LocalSendCallReq),
+  add_node(RunningID, SendReqNode, States, Transitions);
+generate_node(LocalSendCallResp = {local_call_response_send, _, _}, RunningID, States, Transitions) ->
+  SendReqNode = call_response_send_node(RunningID, LocalSendCallResp),
+  add_node(RunningID, SendReqNode, States, Transitions);
+generate_node(LocalRecvCallReq = {local_call_request_recv, _, _}, RunningID, States, Transitions) ->
+  SendReqNode = call_request_recv_node(RunningID, LocalRecvCallReq),
+  add_node(RunningID, SendReqNode, States, Transitions);
+generate_node(LocalRecvCallResp = {local_call_response_recv, _, _}, RunningID, States, Transitions) ->
+  SendReqNode = call_response_recv_node(RunningID, LocalRecvCallResp),
+  add_node(RunningID, SendReqNode, States, Transitions);
 generate_node(Choice = {choice, _, _}, RunningID, States, Transitions) ->
   ChoiceNode = choice_node(RunningID, Choice),
   add_node(RunningID, ChoiceNode, States, Transitions);

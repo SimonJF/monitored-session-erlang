@@ -51,6 +51,66 @@ get_endpoints([Role|Roles], RoleMap) ->
       {error, role_not_found, Role}
   end.
 
+%%% Makes a call request
+handle_do_call(RoleName, MessageName, Recipient, Types, Payload, From, State) ->
+  Message = message:message(make_ref(), RoleName, [Recipient],
+                            MessageName, Types, Payload),
+  Monitors = State#conv_inst_state.role_monitor_mapping,
+  SenderPID = orddict:fetch(RoleName, Monitors),
+  RecipientPIDRes = orddict:find(Recipient, Monitors),
+  % Check to see whether the recipient can be found
+  case RecipientPIDRes of
+    {ok, RecipientPID} ->
+      % If so, check whether we can send a call request
+      MonitorRes = role_monitor:send_call_request(SenderPID, Message),
+      case MonitorRes of
+        ok ->
+          % If we can, then deliver the call request
+          role_monitor:receive_call_request(RecipientPID, Message, From),
+          % The reply will be sent by the appropriate ssa_gen_server.
+          {noreply, State};
+        Err -> {reply, Err, State}
+      end;
+    _ -> {reply, {error, bad_recipient}, State}
+  end.
+
+%%% Replies to a call
+%%% TODO: This method is hideous, needs tidying
+handle_call_reply(RoleName, Recipient, Reply, From, State) ->
+  Message = message:message(make_ref(), RoleName, [Recipient],
+                            "", [], Reply),
+  Monitors = State#conv_inst_state.role_monitor_mapping,
+  SenderPID = orddict:fetch(RoleName, Monitors),
+  RecipientPIDRes = orddict:find(Recipient, Monitors),
+  % Check to see whether the recipient can be found
+  case RecipientPIDRes of
+    {ok, RecipientPID} ->
+      % If so, check whether we can send a call response
+      MonitorRes = role_monitor:send_call_response(SenderPID, Message),
+      case MonitorRes of
+        ok ->
+          % Finally, if all's good so far, check the monitor for the recipient,
+          % and reply to the original request.
+          ReceiveResponseMonitorRes =
+            role_monitor:receive_call_response(RecipientPID, Message),
+          case ReceiveResponseMonitorRes of
+            ok ->
+               gen_server2:reply(From, {ok, message:message_payload(Message)}),
+              {reply, ok, State};
+            Err ->
+               gen_server2:reply(From, {error, resp_recv_monitor_fail}),
+              {reply, {error, Err}, State}
+          end;
+        Err ->
+          gen_server2:reply(From, {error, resp_send_monitor_fail}),
+          {reply, Err, State}
+      end;
+    _ -> {reply, {error, bad_recipient}, State}
+  end.
+
+
+
+
 %%% Handles an outgoing message, by monitoring and sending to the conversation
 %%% instance for routing if all is well.
 handle_outgoing_message(RoleName, Recipients, MessageName, Types, Payload, State) ->
@@ -64,7 +124,6 @@ handle_outgoing_message(RoleName, Recipients, MessageName, Types, Payload, State
       ok -> route_message(Message, State);
       Err -> {reply, Err, State}
   end.
-
 
 % Lookup the destination role, and forward to its monitor.
 route_message(Msg, State) ->
@@ -253,6 +312,10 @@ handle_call({accept_invitation, RoleName}, {Sender, _}, State) ->
 handle_call({outgoing_msg, RoleName, Recipients, MessageName, Types, Payload},
             _From, State) ->
   handle_outgoing_message(RoleName, Recipients, MessageName, Types, Payload, State);
+handle_call({do_call, RoleName, Recipient, MessageName, Types, Payload}, Sender, State) ->
+  handle_do_call(RoleName, MessageName, Recipient, Types, Payload, Sender, State);
+handle_call({call_reply, RoleName, Recipient, Reply, From}, _, State) ->
+  handle_call_reply(RoleName, Recipient, Reply, From, State);
 handle_call(Other, Sender, State) ->
   conversation_warn("Unhandled sync message ~w from ~p", [Other, Sender], State),
   {noreply, State}.
@@ -277,6 +340,12 @@ terminate(_Reason, _State) -> ok.
 
 start(ProtocolName, Roles, Monitors) ->
   gen_server2:start(conversation_instance, [ProtocolName, Roles, Monitors], []).
+
+do_call(ConversationID, Role, Recipient, MessageName, Types, Payload) ->
+  gen_server:call(ConversationID, {do_call, Role, Recipient, MessageName, Types, Payload}).
+
+call_reply(ConversationID, RoleName, Recipient, Reply, From) ->
+  gen_server:call(ConversationID, {call_reply, RoleName, Recipient, Reply, From}).
 
 outgoing_message(Role, ConversationID, Recipients, MessageName, Types, Payload) ->
   gen_server:call(ConversationID, {outgoing_msg, Role, Recipients, MessageName, Types, Payload}).

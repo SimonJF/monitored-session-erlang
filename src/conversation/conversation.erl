@@ -24,6 +24,15 @@ send({Protocol, Role, ConvID, _PPID}, Recipients, MessageName, Types, Payload) -
     Err -> error(Err)
   end.
 
+call({Protocol, Role, ConvID, _}, Recipient, MessageName, Types, Payload) ->
+  Res = conversation_instance:do_call(ConvID, Role, Recipient, MessageName, Types,
+                                      Payload),
+  case Res of
+    {ok, Result} -> ok;
+    {error, Err} -> error(Err)
+  end.
+
+
 % Used to transition to another role.
 become({_, _, _, ProxyPID}, RegAtom, RoleName, Operation, Arguments) ->
   do_become(ProxyPID, RegAtom, RoleName, Operation, Arguments);

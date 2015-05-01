@@ -267,6 +267,10 @@ handle_cast({drop_msg, MsgRef}, State) ->
   QueuedMsgs = State#proxy_state.queued_messages,
   NewQueuedMsgs = orddict:erase(MsgRef, QueuedMsgs),
   {noreply, State#proxy_state{queued_messages=NewQueuedMsgs}};
+handle_cast({deliver_call_req, MonitorPID, ProtocolName, RoleName, ConvID, Msg, From}, State) ->
+  ActorPID = State#proxy_state.actor_pid,
+  ssa_gen_server:recv_call_request(ActorPID, MonitorPID, ProtocolName,
+                                   RoleName, ConvID, Msg, From);
 handle_cast(Other, State) ->
   ActorPid = State#proxy_state.actor_pid,
   gen_server2:cast(ActorPid, Other),
@@ -298,6 +302,9 @@ deliver_message(ProxyPID, MonitorPID, MsgRef) ->
 % Called from conversation_instance to make a synchronous call.
 % make_call(ProxyPID, MonitorPID, ProtocolName, RoleName, ConvID, Msg) ->
 %  gen_server2:cast(ProxyPID, {
+
+deliver_call_request(ProxyPID, MonitorPID, ProtocolName, RoleName, ConvID, Msg, From) ->
+  gen_server2:cast(ProxyPID, {deliver_call_req, MonitorPID, ProtocolName, RoleName, ConvID, Msg, From}).
 
 drop_message(ProxyPID, MsgRef) ->
   gen_server2:cast(ProxyPID, {drop_msg, MsgRef}).
