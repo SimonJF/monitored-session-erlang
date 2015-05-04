@@ -25,6 +25,27 @@ send_node(Id, {local_send, MessageSig, Recipients}) ->
   Info = {Recipients, MessageName, PayloadTypes},
   make_node(send_node, Id, Info).
 
+
+call_request_send_node(Id, {local_call_request_send, MessageSig, Recipient}) ->
+  {message_signature, MessageName, PayloadTypes} = MessageSig,
+  Info = {Recipient, MessageName, PayloadTypes},
+  make_node(call_request_send_node, Id, Info).
+
+call_request_recv_node(Id, {local_call_request_recv, MessageSig, Sender}) ->
+  {message_signature, MessageName, PayloadTypes} = MessageSig,
+  Info = {Sender, MessageName, PayloadTypes},
+  make_node(call_request_recv_node, Id, Info).
+
+call_response_send_node(Id, {local_call_response_send, MessageSig, Recipient}) ->
+  {message_signature, MessageName, PayloadTypes} = MessageSig,
+  Info = {Recipient, MessageName, PayloadTypes},
+  make_node(call_response_send_node, Id, Info).
+
+call_response_recv_node(Id, {local_call_response_recv, MessageSig, Sender}) ->
+  {message_signature, MessageName, PayloadTypes} = MessageSig,
+  Info = {Sender, MessageName, PayloadTypes},
+  make_node(call_response_recv_node, Id, Info).
+
 choice_node(Id, _Choice) ->
   make_node(choice_node, Id, {}).
 
@@ -49,6 +70,10 @@ block_size([X|XS]) -> instruction_size(X) + block_size(XS).
 
 instruction_size({local_send, _, _}) -> 1;
 instruction_size({local_receive, _, _}) -> 1;
+instruction_size({local_call_request_send, _, _}) -> 1;
+instruction_size({local_call_request_recv, _, _}) -> 1;
+instruction_size({local_call_response_send, _, _}) -> 1;
+instruction_size({local_call_response_recv, _, _}) -> 1;
 instruction_size({choice, _, Choices}) ->
   1 + lists:foldl(fun(ChoiceBlock, Sum) -> Sum + block_size(ChoiceBlock) end, 0, Choices);
 instruction_size({rec, _, Block}) -> 1 + block_size(Block);
@@ -69,6 +94,10 @@ instruction_size({local_invites, _, InvitesBlock}) -> block_size(InvitesBlock).
 
 node_type({local_send, _, _}) -> simple_transition;
 node_type({local_receive, _, _}) -> simple_transition;
+node_type({local_call_request_send, _, _}) -> simple_transition;
+node_type({local_call_request_recv, _, _}) -> simple_transition;
+node_type({local_call_response_send, _, _}) -> simple_transition;
+node_type({local_call_response_recv, _, _}) -> simple_transition;
 node_type({choice, _, _}) -> new_scope;
 node_type({rec, _, _}) -> new_scope;
 node_type({parallel, _}) -> new_scope;
@@ -214,7 +243,18 @@ evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, RunningID, States, Transitio
         {choice, _RoleName, ChoiceBlocks} ->
           % For choices, we'll need to create new scopes for each choice block.
           % Calculate the end index, taking into account sub-blocks:
-          ScopeEndIndex = RunningID + instruction_size(X),
+          % I'm worried this is getting more and more hacky and unmaintainable...
+          % Here, we check whether there is a continue node right after the end
+          % of the choice block. If so, we loop back to the beginning.
+          ScopeEndIndex =
+            case XS of
+              [{continue, MuName}|_YS] ->
+                case orddict:find(MuName, MuMap) of
+                  {ok, MuID} -> MuID;
+                  error -> error({bad_mu_name, MuName})
+                end;
+              _ -> RunningID + instruction_size(X)
+            end,
           ChoiceNodeID = RunningID,
           {RID1, States1, Transitions1} = generate_node(X, RunningID, States, Transitions),
           % Now, generate the remainder of the scope, with the calculated end index.
@@ -229,7 +269,7 @@ evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, RunningID, States, Transitio
                            evaluate_scope(Scope, RID, RStates, RTransitions1) end,
                       {RID1, States1, Transitions1}, ChoiceBlocks),
           evaluate_scope_inner(XS, EndIndex, RID2, States2, Transitions2, MuMap);
-          % TODO: Recursion, Choice, Parallel, Interruptible
+          % TODO: Parallel, Interruptible
         {rec, MuName, Interactions} ->
           ScopeEndIndex = RunningID + instruction_size(X),
           RecNodeID = RunningID,
@@ -276,6 +316,18 @@ generate_node(LocalRecv = {local_receive, _, _}, RunningID, States, Transitions)
 generate_node(LocalSend = {local_send, _, _}, RunningID, States, Transitions) ->
   SendNode = send_node(RunningID, LocalSend),
   add_node(RunningID, SendNode, States, Transitions);
+generate_node(LocalSendCallReq= {local_call_request_send, _, _}, RunningID, States, Transitions) ->
+  SendReqNode = call_request_send_node(RunningID, LocalSendCallReq),
+  add_node(RunningID, SendReqNode, States, Transitions);
+generate_node(LocalSendCallResp = {local_call_response_send, _, _}, RunningID, States, Transitions) ->
+  SendReqNode = call_response_send_node(RunningID, LocalSendCallResp),
+  add_node(RunningID, SendReqNode, States, Transitions);
+generate_node(LocalRecvCallReq = {local_call_request_recv, _, _}, RunningID, States, Transitions) ->
+  SendReqNode = call_request_recv_node(RunningID, LocalRecvCallReq),
+  add_node(RunningID, SendReqNode, States, Transitions);
+generate_node(LocalRecvCallResp = {local_call_response_recv, _, _}, RunningID, States, Transitions) ->
+  SendReqNode = call_response_recv_node(RunningID, LocalRecvCallResp),
+  add_node(RunningID, SendReqNode, States, Transitions);
 generate_node(Choice = {choice, _, _}, RunningID, States, Transitions) ->
   ChoiceNode = choice_node(RunningID, Choice),
   add_node(RunningID, ChoiceNode, States, Transitions);

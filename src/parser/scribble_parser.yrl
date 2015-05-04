@@ -77,20 +77,25 @@ simplemembername
 module_ident_inner
 module_ident_inners
 ext_identifier
-localinvites.
+localinvites
+localsendcallreq
+localrecvcallreq
+localsendcallresp
+localrecvcallresp.
+
 
 
 
 % List of terminals.
 Terminals
-module_kw import_kw type_kw protocol_kw global_kw local_kw role_kw
-sig_kw instantiates_kw as_kw from_kw to_kw choice_kw at_kw or_kw
-rec_kw continue_kw par_kw and_kw interruptible_kw with_kw by_kw
-throws_kw catches_kw do_kw left_brace right_brace left_bracket
-right_bracket left_square_bracket right_square_bracket colon forward_slash
-back_slash dot hash ampersand question_mark exlamation_mark underscore
-comma semicolon less_than greater_than ident ext_ident transient_kw
-invitation_kw for_kw.
+module_kw import_kw type_kw protocol_kw global_kw local_kw role_kw sig_kw
+instantiates_kw as_kw from_kw to_kw choice_kw at_kw or_kw rec_kw continue_kw
+par_kw and_kw interruptible_kw with_kw by_kw throws_kw catches_kw do_kw
+left_brace right_brace left_bracket right_bracket left_square_bracket
+right_square_bracket colon forward_slash back_slash dot hash ampersand
+question_mark exlamation_mark underscore comma semicolon less_than greater_than
+ident ext_ident transient_kw invitation_kw for_kw send_call_request_kw
+send_call_response_kw receive_call_request_kw receive_call_response_kw.
 
 
 % Module is the root symbol.
@@ -340,6 +345,10 @@ localinteraction -> localrecursion : '$1'.
 localinteraction -> localcontinue : '$1'.
 localinteraction -> localinterruptible : '$1'.
 localinteraction -> localdo : '$1'.
+localinteraction -> localsendcallreq : '$1'.
+localinteraction -> localrecvcallreq : '$1'.
+localinteraction -> localsendcallresp : '$1'.
+localinteraction -> localrecvcallresp : '$1'.
 localinteraction -> localinvites : '$1'.
 
 localsend -> message to_kw identifier identifierlist semicolon:
@@ -390,9 +399,20 @@ localdo -> do_kw identifier colon membername roleinstantiationlist semicolon:
 localdo -> do_kw identifier colon membername argumentlist roleinstantiationlist semicolon:
   scribble_ast:do_scope('$2', '$4', '$5', '$6').
 
-
 localinvites -> invitation_kw for_kw identifier localprotocolblock :
   scribble_ast:local_invites('$3', '$4').
+
+localsendcallreq -> send_call_request_kw messagesignature to_kw identifier semicolon:
+  scribble_ast:local_call_request_send('$2', '$4').
+
+localrecvcallreq -> receive_call_request_kw messagesignature from_kw identifier semicolon:
+  scribble_ast:local_call_request_recv('$2', '$4').
+
+localsendcallresp -> send_call_response_kw messagesignature to_kw identifier semicolon:
+  scribble_ast:local_call_response_send('$2', '$4').
+
+localrecvcallresp -> receive_call_response_kw messagesignature from_kw identifier semicolon:
+  scribble_ast:local_call_response_recv('$2', '$4').
 
 Erlang code.
 unwrap({_, V}) -> V;

@@ -200,7 +200,7 @@ handle_cast({ssa_msg, MonitorPID, Protocol, Role, ConversationID, MsgData}, Stat
         role_monitor:handler_finished(MonitorPID, NewRoleState),
         NewState;
       Other ->
-        exit(bad_return_value)
+        exit(wrong_return_value)
     end,
   {noreply, State#actor_state{user_state=NewUserState}};
 
@@ -234,9 +234,56 @@ handle_cast({conversation_ended, CID, Reason}, State) ->
   UserState = State#actor_state.user_state,
   {ok, NewUserState} = Module:ssactor_conversation_ended(CID, Reason, UserState),
   {noreply, State#actor_state{user_state=NewUserState}};
+
+% In-session synchronous call
+handle_cast({ssa_call_req, MonitorPID, ProtocolName, RoleName, ConversationID,
+             MsgData, From}, State) ->
+  actor_info("Processing synchronous call ~p ~n", [MsgData], State),
+  Sender = message:message_sender(MsgData),
+  Op = message:message_name(MsgData),
+  Payload = message:message_payload(MsgData),
+  Module = State#actor_state.actor_type_name,
+  UserState = State#actor_state.user_state,
+  % Notify monitor that we've started processing the message
+  role_monitor:handler_started(MonitorPID),
+  HandleRes = Module:ssactor_handle_call(
+                   ProtocolName, RoleName, ConversationID, Sender, Op, Payload, UserState,
+                   {ProtocolName, RoleName, ConversationID, State#actor_state.proxy_pid}),
+  % Save role state, reset handler state to idle, and grab new user state
+  NewUserState =
+    case HandleRes of
+      {reply, Reply, NewState} ->
+        role_monitor:handler_finished(MonitorPID),
+        % Send the reply back to the caller
+        actor_info("Replying to synchronous call ~p ~n", [Reply], State),
+        conversation_instance:call_reply(ConversationID, RoleName, Sender, Op, Reply, From),
+        NewState;
+      {reply, Reply, NewState, NewRoleState} ->
+        actor_info("Replying to synchronous call ~p ~n", [Reply], State),
+        role_monitor:handler_finished(MonitorPID, NewRoleState),
+        conversation_instance:call_reply(ConversationID, RoleName, Sender, Op, Reply, From),
+        NewState;
+      {noreply, NewState} ->
+        role_monitor:handler_finished(MonitorPID),
+        NewState;
+      {noreply, NewState, NewRoleState} ->
+        role_monitor:handler_finished(MonitorPID, NewRoleState),
+        NewState;
+      {stop, NewState} ->
+        % TODO: yadayada need to do some stuff to stop here
+        role_monitor:handler_finished(MonitorPID),
+        NewState;
+      {stop, NewState, NewRoleState} ->
+        % As above
+        role_monitor:handler_finished(MonitorPID, NewRoleState),
+        NewState;
+      _Other ->
+        exit(wrong_return_value)
+    end,
+  {noreply, State#actor_state{user_state=NewUserState}};
+
 handle_cast(Msg, State) ->
   delegate_async(handle_cast, Msg, State).
-
 
 % Info messages -- we don't do anything with these
 handle_info(Msg, State) ->
@@ -274,6 +321,8 @@ conversation_ended(ActorPID, CID, Reason) ->
 message(ActorPID, MonitorPID, ProtocolName, RoleName, ConvID, Msg) ->
   gen_server2:cast(ActorPID, {ssa_msg, MonitorPID, ProtocolName, RoleName, ConvID, Msg}).
 
+recv_call_request(ActorPID, MonitorPID, ProtocolName, RoleName, ConvID, Msg, From) ->
+  gen_server2:cast(ActorPID, {ssa_call_req, MonitorPID, ProtocolName, RoleName, ConvID, Msg, From}).
 
 %%%%%%%%%%%%%%%%%%%%%%
 %%%%  Public  API %%%%
@@ -294,7 +343,6 @@ start_link(ModuleName, Args, Options) ->
 start_link(RegName, ModuleName, Args, Options) ->
   Res = gen_server2:start_link(ssa_gen_server, [RegName, ModuleName, Args], Options),
   unwrap_start_result(Res).
-
 
 call(ServerRef, Message) ->
   gen_server2:call(ServerRef, Message).

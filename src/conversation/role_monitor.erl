@@ -26,7 +26,7 @@ log_msg(Func, Format, Args, State) ->
               self()],
   Func(Format ++ "~n" ++ InfoStr, Args ++ InfoArgs).
 
-% Warn function. It was ad-hoc, horrific, and verbos before, so standardise it.
+% Warn function. It was ad-hoc, horrific, and verbose before, so standardise it.
 monitor_warn(Format, Args, State) ->
   log_msg(fun error_logger:warning_msg/2, Format, Args, State).
 
@@ -47,6 +47,7 @@ queue_incoming_message(Msg, State) ->
   actor_proxy:queue_message(ActorPid, ProtocolName, RoleName,
                             ConversationID, Msg).
 
+
 % "Commit" the message, sending it to the program logic
 commit_incoming_message(MsgRef, State) ->
   ActorPID = State#role_monitor_state.actor_pid,
@@ -56,6 +57,11 @@ commit_incoming_message(MsgRef, State) ->
 drop_incoming_message(MsgRef, State) ->
   ActorPID = State#role_monitor_state.actor_pid,
   actor_proxy:drop_message(ActorPID, MsgRef).
+
+
+report_monitor_fail(MessageData, CommType, Err, State) ->
+   monitor_warn("Monitor failed when processing message ~p (~p). Error: ~p~n",
+                [MessageData, CommType, Err], State).
 
 %deliver_outgoing_message(Msg, State) ->
 %  ProtocolName = State#role_monitor_state.protocol_name,
@@ -69,45 +75,93 @@ handle_incoming_message(MessageData, State) ->
   monitor_info("Handling incoming message ~p", [MessageData], State),
   Res = monitor_msg(recv, MessageData, State),
   case Res of
+    {ok, NewState} ->
+      queue_incoming_message(MessageData, NewState),
+      {ok, NewState};
+    Err -> {Err, State} % assuming the error has been logged already
+  end.
+
+
+handle_incoming_call_resp(MessageData, State) ->
+  monitor_info("Handling incoming message ~p", [MessageData], State),
+  Res = monitor_msg(recv_call_resp, MessageData, State),
+  case Res of
     {ok, NewState} -> {ok, NewState};
     Err -> {Err, State} % assuming the error has been logged already
   end.
 
 
+handle_incoming_call_req(MessageData, State, From) ->
+  Res = monitor_msg(recv_call_req, MessageData, State),
+  case Res of
+    {ok, NewState} ->
+      Res2 = deliver_call_request(MessageData, NewState, From),
+      if Res2 == ok ->
+          {ok, NewState};
+         Res2 =/= ok ->
+          % Actor has died; rollback the monitor, call off the dawn
+          {{error, dead_actor}, State}
+      end;
+    Err ->
+      monitor_info("Monitor failed:~p~n", [Err], State),
+      % TODO: Here, notify sender that the monitor has failed.
+      {Err, State}
+  end.
+
+deliver_call_request(Message, State, From) ->
+
+  % Grab everything that we need from the state
+  ActorPID = State#role_monitor_state.actor_pid,
+  ProtocolName = State#role_monitor_state.protocol_name,
+  RoleName = State#role_monitor_state.role_name,
+  ConversationID = State#role_monitor_state.conversation_id,
+
+  % Check whether the actor's alive, and deliver the call request if so
+  IsAlive = actor_proxy:is_actor_alive(ActorPID),
+  if IsAlive ->
+      actor_proxy:deliver_call_request(ActorPID, self(), ProtocolName, RoleName,
+                                       ConversationID, Message, From),
+      ok;
+     not IsAlive ->
+       error
+  end.
+
+
+
 %%% Handles an outgoing message, by monitoring and sending to the conversation
 %%% instance for routing if all is well.
-handle_outgoing_message(Message, State) ->
+handle_outgoing_message(MessageType, Message, State) ->
   % Construct a message instance, send to the monitor, and check the result
-  monitor_msg(send, Message, State).
+  MonitorRes = monitor_msg(MessageType, Message, State),
+  case MonitorRes of
+    {ok, NewState} ->
+       % Return ok, indicating the monitor's fine, and store the new monitor
+       % Mark that a message has been sent in this handler
+       NewState1 = NewState#role_monitor_state{handler_state=message_sent},
+       {ok, NewState1};
+    Err ->
+       report_monitor_fail(Message, MessageType, Err, State),
+       {error, Err}
+  end.
 
 % Performs the actual monitoring.
 monitor_msg(CommType, MessageData, State) ->
-  MonitorFunction = case CommType of
-                     send -> fun monitor:send/2;
-                     recv -> fun monitor:recv/2
-                   end,
+  MonitorFunction =
+    case CommType of
+      send -> fun monitor:send/2;
+      recv -> fun monitor:recv/2;
+      send_call_req -> fun monitor:send_call_request/2;
+      recv_call_req -> fun monitor:recv_call_request/2;
+      send_call_resp -> fun monitor:send_call_response/2;
+      recv_call_resp -> fun monitor:recv_call_response/2
+    end,
   Monitor = State#role_monitor_state.monitor,
   MonitorResult = MonitorFunction(MessageData, Monitor),
   case MonitorResult of
     {ok, NewMonitorInstance} ->
       NewState = State#role_monitor_state{monitor=NewMonitorInstance},
-      % Do delegation stuff here
-      % If we're sending, then pop it to the conversation instance process
-      % If we're receiving, then delegate to user session actor code.
-      case CommType of
-        send ->
-          % Return ok, indicating the monitor's fine, and store the new monitor
-          % Mark that a message has been sent in this handler
-          NewState1 = NewState#role_monitor_state{handler_state=message_sent},
-          {ok, NewState1};
-        recv ->
-          queue_incoming_message(MessageData, NewState),
-          {ok, NewState}
-      end;
-    {error, Err, _Monitor} ->
-      monitor_warn("Monitor failed when processing message ~p (~p). Error: ~p~n",
-                   [MessageData, CommType, Err], State),
-      {error, Err}
+      {ok, NewState};
+    {error, Err, _Monitor} -> {error, Err}
   end.
 
 with_actor_pid(Fun, State) ->
@@ -145,7 +199,27 @@ init([ProtocolName, RoleName, ConversationPid, Monitor]) ->
 handle_call({send_ssa_message, Msg},
             _From, State) ->
   % Handle the actor sending a message
-  {Reply, NewState} = handle_outgoing_message(Msg, State),
+  {Reply, NewState} = handle_outgoing_message(send, Msg, State),
+  {reply, Reply, NewState};
+handle_call({send_call_request, Msg},
+            _From, State) ->
+  % Handle the actor sending a message
+  {Reply, NewState} = handle_outgoing_message(send_call_req, Msg, State),
+  {reply, Reply, NewState};
+handle_call({send_call_response, Msg},
+            _From, State) ->
+  % Handle the actor sending a message
+  {Reply, NewState} = handle_outgoing_message(send_call_resp, Msg, State),
+  {reply, Reply, NewState};
+handle_call({recv_call_request, Msg, From},
+            _From, State) ->
+  % Handle the actor sending a message
+  {Reply, NewState} = handle_incoming_call_req(Msg, State, From),
+  {reply, Reply, NewState};
+handle_call({recv_call_response, Msg},
+            _From, State) ->
+  % Handle the actor sending a message
+  {Reply, NewState} = handle_incoming_call_resp(Msg, State),
   {reply, Reply, NewState};
 handle_call({receive_ssa_message, Msg}, _From, State) ->
   % Handle the actor receiving a message
@@ -223,6 +297,18 @@ commit_message(MonitorPID, MsgRef) ->
 
 drop_message(MonitorPID, MsgRef) ->
   gen_server2:cast(MonitorPID, {drop_message, MsgRef}).
+
+send_call_request(MonitorPID, Message) ->
+  gen_server2:call(MonitorPID, {send_call_request, Message}).
+
+receive_call_request(MonitorPID, Message, From) ->
+  gen_server2:call(MonitorPID, {recv_call_request, Message, From}).
+
+send_call_response(MonitorPID, Message) ->
+  gen_server2:call(MonitorPID, {send_call_response, Message}).
+
+receive_call_response(MonitorPID, Message) ->
+  gen_server2:call(MonitorPID, {recv_call_response, Message}).
 
 start_link(ProtocolName, RoleName, ConversationID, MonitorFSM) ->
   gen_server2:start_link(role_monitor, [ProtocolName, RoleName, ConversationID, MonitorFSM], []).

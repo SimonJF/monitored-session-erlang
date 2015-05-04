@@ -71,6 +71,10 @@ DOKW = do
 TRANSIENTKW = transient
 INVITATIONKW = invitation
 FORKW = for
+SEND_CALL_REQ = send_call_request
+SEND_CALL_RESPONSE = send_call_response
+RECV_CALL_REQ = receive_call_request
+RECV_CALL_RESPONSE = receive_call_response
 
 % --- Lexer Rules ---
 
@@ -105,6 +109,11 @@ Rules.
 {TRANSIENTKW} : make_token(transient_kw, TokenLine, TokenChars).
 {INVITATIONKW} : make_token(invitation_kw, TokenLine, TokenChars).
 {FORKW} : make_token(for_kw, TokenLine, TokenChars).
+{SEND_CALL_REQ} : make_token(send_call_request_kw, TokenLine, TokenChars).
+{SEND_CALL_RESPONSE} : make_token(send_call_response_kw, TokenLine, TokenChars).
+{RECV_CALL_REQ} : make_token(receive_call_request_kw, TokenLine, TokenChars).
+{RECV_CALL_RESPONSE} : make_token(receive_call_response_kw, TokenLine, TokenChars).
+
 
 
 % Identifiers
