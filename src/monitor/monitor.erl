@@ -178,12 +178,14 @@ next_node(InteractionType, Message, MonitorNode, MonitorInstance) ->
 check_receive(Message, Sender, MessageName, PayloadTypes) ->
   CorrectSender = message:message_sender(Message) == Sender,
   CorrectMessageName = message:message_name(Message) == MessageName,
-  CorrectPayloadTypes = message:message_payload_types(Message) == PayloadTypes,
+  CorrectPayloadTypes = true, % For now. The "check the strings" thing is nonsense,
+                              % I'd much rather do a "type checker" soon.
+  %message:message_payload_types(Message) == PayloadTypes,
   case {CorrectSender, CorrectMessageName, CorrectPayloadTypes} of
     {true, true, true} -> true;
     {false, _, _} -> {false, bad_sender};
-    {_, false, _} -> {false, bad_message_name};
-    {_, _, false} -> {false, bad_payload_types}
+    {_, false, _} -> {false, bad_message_name}
+    % {_, _, false} -> {false, bad_payload_types}
   end.
 
 can_receive_at(Message, {receive_node, _Id, Info}, _MonitorInstance) ->
@@ -197,7 +199,7 @@ can_receive_at(Message, _MonitorNode, _MonitorInstance) ->
 
 can_receive_request_at(Message, {call_request_recv_node, _Id, Info}, _MonitorInstance) ->
   {Recipient, MessageName, PayloadTypes} = Info,
-  check_receive(Message, [Recipient], MessageName, PayloadTypes);
+  check_receive(Message, Recipient, MessageName, PayloadTypes);
 can_receive_request_at(Message, _MonitorNode, _MonitorInstance) ->
   error_logger:error_msg("Monitor rejected message ~p:" ++
                          " expected to receive a call request~n", [Message]),
@@ -216,27 +218,27 @@ can_receive_response_at(Message, _MonitorNode, _MonitorInstance) ->
 check_send(Message, Recipients, MessageName, PayloadTypes) ->
   CorrectRecipients = lists:sort(Recipients) == lists:sort(message:message_recipients(Message)),
   CorrectMessageName = message:message_name(Message) == MessageName,
-  CorrectPayloadTypes = message:message_payload_types(Message) == PayloadTypes,
+  CorrectPayloadTypes = true, %message:message_payload_types(Message) == PayloadTypes,
   case {CorrectRecipients, CorrectMessageName, CorrectPayloadTypes} of
     {true, true, true} -> true;
     {false, _, _} -> {false, bad_recipients};
-    {_, false, _} -> {false, bad_message_name};
-    {_, _, false} -> {false, bad_payload_types}
+    {_, false, _} -> {false, bad_message_name}
+    % {_, _, false} -> {false, bad_payload_types}
   end.
 
 can_send_at(Message, {send_node, _Id, Info}, _MonitorInstance) ->
   {Recipients, MessageName, PayloadTypes} = Info,
   check_send(Message, Recipients, MessageName, PayloadTypes);
 can_send_at(Message, _MonitorNode, _MonitorInstance) ->
-  error_logger:error_msg("Monitor rejected message ~p: expected to send~n", [Message]),
+  error_logger:error_msg("Monitor rejected message ~p: tried to send~n", [Message]),
   {false, bad_node_type}.
 
 can_send_request_at(Message, {call_request_send_node, _Id, Info}, _MonitorInstance) ->
   {Recipient, MessageName, PayloadTypes} = Info,
   check_send(Message, [Recipient], MessageName, PayloadTypes);
-can_send_request_at(Message, _MonitorNode, _MonitorInstance) ->
+can_send_request_at(Message, MonitorNode, _MonitorInstance) ->
   error_logger:error_msg("Monitor rejected message ~p:" ++
-                         " expected to send a call request~n", [Message]),
+                         " tried to send a call request; monitor node: ~p~n", [Message, MonitorNode]),
   {false, bad_node_type}.
 
 can_send_response_at(Message, {call_response_send_node, _Id, Info}, _MonitorInstance) ->
@@ -244,7 +246,7 @@ can_send_response_at(Message, {call_response_send_node, _Id, Info}, _MonitorInst
   check_send(Message, [Recipient], MessageName, PayloadTypes);
 can_send_response_at(Message, _MonitorNode, _MonitorInstance) ->
   error_logger:error_msg("Monitor rejected message ~p:" ++
-                         " expected to send a call response~n", [Message]),
+                         " tried to send a call response~n", [Message]),
   {false, bad_node_type}.
 
 

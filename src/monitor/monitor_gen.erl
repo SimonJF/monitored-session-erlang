@@ -243,7 +243,18 @@ evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, RunningID, States, Transitio
         {choice, _RoleName, ChoiceBlocks} ->
           % For choices, we'll need to create new scopes for each choice block.
           % Calculate the end index, taking into account sub-blocks:
-          ScopeEndIndex = RunningID + instruction_size(X),
+          % I'm worried this is getting more and more hacky and unmaintainable...
+          % Here, we check whether there is a continue node right after the end
+          % of the choice block. If so, we loop back to the beginning.
+          ScopeEndIndex =
+            case XS of
+              [{continue, MuName}|_YS] ->
+                case orddict:find(MuName, MuMap) of
+                  {ok, MuID} -> MuID;
+                  error -> error({bad_mu_name, MuName})
+                end;
+              _ -> RunningID + instruction_size(X)
+            end,
           ChoiceNodeID = RunningID,
           {RID1, States1, Transitions1} = generate_node(X, RunningID, States, Transitions),
           % Now, generate the remainder of the scope, with the calculated end index.
@@ -258,7 +269,7 @@ evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, RunningID, States, Transitio
                            evaluate_scope(Scope, RID, RStates, RTransitions1) end,
                       {RID1, States1, Transitions1}, ChoiceBlocks),
           evaluate_scope_inner(XS, EndIndex, RID2, States2, Transitions2, MuMap);
-          % TODO: Recursion, Choice, Parallel, Interruptible
+          % TODO: Parallel, Interruptible
         {rec, MuName, Interactions} ->
           ScopeEndIndex = RunningID + instruction_size(X),
           RecNodeID = RunningID,

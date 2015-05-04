@@ -200,7 +200,7 @@ handle_cast({ssa_msg, MonitorPID, Protocol, Role, ConversationID, MsgData}, Stat
         role_monitor:handler_finished(MonitorPID, NewRoleState),
         NewState;
       Other ->
-        exit(bad_return_value)
+        exit(wrong_return_value)
     end,
   {noreply, State#actor_state{user_state=NewUserState}};
 
@@ -255,11 +255,13 @@ handle_cast({ssa_call_req, MonitorPID, ProtocolName, RoleName, ConversationID,
       {reply, Reply, NewState} ->
         role_monitor:handler_finished(MonitorPID),
         % Send the reply back to the caller
-        conversation_instance:call_reply(ConversationID, RoleName, Sender, Reply, From),
+        actor_info("Replying to synchronous call ~p ~n", [Reply], State),
+        conversation_instance:call_reply(ConversationID, RoleName, Sender, Op, Reply, From),
         NewState;
       {reply, Reply, NewState, NewRoleState} ->
+        actor_info("Replying to synchronous call ~p ~n", [Reply], State),
         role_monitor:handler_finished(MonitorPID, NewRoleState),
-        conversation_instance:call_reply(ConversationID, RoleName, Sender, Reply, From),
+        conversation_instance:call_reply(ConversationID, RoleName, Sender, Op, Reply, From),
         NewState;
       {noreply, NewState} ->
         role_monitor:handler_finished(MonitorPID),
@@ -276,7 +278,7 @@ handle_cast({ssa_call_req, MonitorPID, ProtocolName, RoleName, ConversationID,
         role_monitor:handler_finished(MonitorPID, NewRoleState),
         NewState;
       _Other ->
-        exit(bad_return_value)
+        exit(wrong_return_value)
     end,
   {noreply, State#actor_state{user_state=NewUserState}};
 

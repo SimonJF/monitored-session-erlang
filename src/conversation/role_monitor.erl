@@ -92,21 +92,24 @@ handle_incoming_call_resp(MessageData, State) ->
 
 
 handle_incoming_call_req(MessageData, State, From) ->
-  monitor_info("Handling incoming call request~p", [MessageData], State),
   Res = monitor_msg(recv_call_req, MessageData, State),
   case Res of
     {ok, NewState} ->
-      Res = deliver_call_request(MessageData, NewState, From),
-      if Res == ok ->
-        {ok, NewState};
-      Res =/= ok ->
-        % Actor has died; rollback the monitor, call off the dawn
-        {{error, dead_actor}, State}
+      Res2 = deliver_call_request(MessageData, NewState, From),
+      if Res2 == ok ->
+          {ok, NewState};
+         Res2 =/= ok ->
+          % Actor has died; rollback the monitor, call off the dawn
+          {{error, dead_actor}, State}
       end;
-    Err -> {Err, State} % assuming the error has been logged already
+    Err ->
+      monitor_info("Monitor failed:~p~n", [Err], State),
+      % TODO: Here, notify sender that the monitor has failed.
+      {Err, State}
   end.
 
 deliver_call_request(Message, State, From) ->
+
   % Grab everything that we need from the state
   ActorPID = State#role_monitor_state.actor_pid,
   ProtocolName = State#role_monitor_state.protocol_name,
@@ -116,10 +119,11 @@ deliver_call_request(Message, State, From) ->
   % Check whether the actor's alive, and deliver the call request if so
   IsAlive = actor_proxy:is_actor_alive(ActorPID),
   if IsAlive ->
-      actor_proxy:deliver_call_request(ActorPID, ProtocolName, RoleName,
+      actor_proxy:deliver_call_request(ActorPID, self(), ProtocolName, RoleName,
                                        ConversationID, Message, From),
       ok;
-     not IsAlive -> error
+     not IsAlive ->
+       error
   end.
 
 

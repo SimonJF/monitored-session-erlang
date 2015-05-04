@@ -76,9 +76,9 @@ handle_do_call(RoleName, MessageName, Recipient, Types, Payload, From, State) ->
 
 %%% Replies to a call
 %%% TODO: This method is hideous, needs tidying
-handle_call_reply(RoleName, Recipient, Reply, From, State) ->
+handle_call_reply(RoleName, Recipient, MessageName, Reply, From, State) ->
   Message = message:message(make_ref(), RoleName, [Recipient],
-                            "", [], Reply),
+                            MessageName, [], Reply),
   Monitors = State#conv_inst_state.role_monitor_mapping,
   SenderPID = orddict:fetch(RoleName, Monitors),
   RecipientPIDRes = orddict:find(Recipient, Monitors),
@@ -95,7 +95,7 @@ handle_call_reply(RoleName, Recipient, Reply, From, State) ->
             role_monitor:receive_call_response(RecipientPID, Message),
           case ReceiveResponseMonitorRes of
             ok ->
-               gen_server2:reply(From, {ok, message:message_payload(Message)}),
+              gen_server2:reply(From, {ok, message:message_payload(Message)}),
               {reply, ok, State};
             Err ->
                gen_server2:reply(From, {error, resp_recv_monitor_fail}),
@@ -314,8 +314,8 @@ handle_call({outgoing_msg, RoleName, Recipients, MessageName, Types, Payload},
   handle_outgoing_message(RoleName, Recipients, MessageName, Types, Payload, State);
 handle_call({do_call, RoleName, Recipient, MessageName, Types, Payload}, Sender, State) ->
   handle_do_call(RoleName, MessageName, Recipient, Types, Payload, Sender, State);
-handle_call({call_reply, RoleName, Recipient, Reply, From}, _, State) ->
-  handle_call_reply(RoleName, Recipient, Reply, From, State);
+handle_call({call_reply, RoleName, Recipient, MessageName, Reply, From}, _, State) ->
+  handle_call_reply(RoleName, Recipient, MessageName, Reply, From, State);
 handle_call(Other, Sender, State) ->
   conversation_warn("Unhandled sync message ~w from ~p", [Other, Sender], State),
   {noreply, State}.
@@ -344,8 +344,8 @@ start(ProtocolName, Roles, Monitors) ->
 do_call(ConversationID, Role, Recipient, MessageName, Types, Payload) ->
   gen_server:call(ConversationID, {do_call, Role, Recipient, MessageName, Types, Payload}).
 
-call_reply(ConversationID, RoleName, Recipient, Reply, From) ->
-  gen_server:call(ConversationID, {call_reply, RoleName, Recipient, Reply, From}).
+call_reply(ConversationID, RoleName, Recipient, MessageName, Reply, From) ->
+  gen_server:call(ConversationID, {call_reply, RoleName, Recipient, MessageName, Reply, From}).
 
 outgoing_message(Role, ConversationID, Recipients, MessageName, Types, Payload) ->
   gen_server:call(ConversationID, {outgoing_msg, Role, Recipients, MessageName, Types, Payload}).

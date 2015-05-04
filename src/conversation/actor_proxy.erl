@@ -270,8 +270,10 @@ handle_cast({drop_msg, MsgRef}, State) ->
 handle_cast({deliver_call_req, MonitorPID, ProtocolName, RoleName, ConvID, Msg, From}, State) ->
   ActorPID = State#proxy_state.actor_pid,
   ssa_gen_server:recv_call_request(ActorPID, MonitorPID, ProtocolName,
-                                   RoleName, ConvID, Msg, From);
+                                   RoleName, ConvID, Msg, From),
+  {noreply, State};
 handle_cast(Other, State) ->
+  error_logger:warning_msg("Warn: pass-through cast ~p~n", [Other]),
   ActorPid = State#proxy_state.actor_pid,
   gen_server2:cast(ActorPid, Other),
   {noreply, State}.

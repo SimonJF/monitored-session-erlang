@@ -28,7 +28,7 @@ call({Protocol, Role, ConvID, _}, Recipient, MessageName, Types, Payload) ->
   Res = conversation_instance:do_call(ConvID, Role, Recipient, MessageName, Types,
                                       Payload),
   case Res of
-    {ok, Result} -> ok;
+    {ok, Result} -> Result;
     {error, Err} -> error(Err)
   end.
 
