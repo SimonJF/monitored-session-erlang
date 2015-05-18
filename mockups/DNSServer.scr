@@ -11,13 +11,12 @@ global protocol HandleDNSRequest(
       invitation from DNSQueryResolver for DNSZoneDataServer {
         GetZoneData() from DNSQueryResolver to DNSZoneDataServer;
         ZoneDataResponse(Response) from DNSZoneDataServer to DNSQueryResolver;
-
         choice at DNSQueryResolver {
           QueryResponse(QueryResponseData) from DNSQueryResolver to UDPHandlerServer;
         } or {
-          continue QueryResolution;
+          ZoneNotFound() from DNSQueryResolver to UDPHandlerServer;
         }
-
+        continue QueryResolution;
       }
     } or {
       InvalidZone() from DNSZoneDataServer to UDPHandlerServer;
