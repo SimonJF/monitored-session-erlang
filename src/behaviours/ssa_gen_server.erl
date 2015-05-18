@@ -85,7 +85,6 @@ init([RegName, Module, UserArgs]) ->
 
 
 finish_init(Module, UserArgs, ProxyProcess) ->
-  process_flag(trap_exit, true),
   case ProxyProcess of
     {ok, ProxyPID} ->
       actor_type_registry:register_actor_instance(Module, ProxyPID),
@@ -294,10 +293,11 @@ code_change(_PreviousVersion, State, _Extra) ->
   {ok, State}.
 
 terminate(Reason, State) ->
-  actor_error("Actor terminating for reason ~p~n", [Reason], State),
   Module = State#actor_state.actor_type_name,
   ProxyPID = State#actor_state.proxy_pid,
   UserState = State#actor_state.user_state,
+  exit(ProxyPID, kill), % FIXME: TEMP HACK
+  actor_error("Actor terminating for reason ~p~n", [Reason], State),
   actor_type_registry:deregister_actor_instance(Module, ProxyPID),
   Module:terminate(Reason, UserState),
   ok.
@@ -333,10 +333,12 @@ start(ModuleName, Args, Options) ->
   unwrap_start_result(Res).
 
 start(RegName, ModuleName, Args, Options) ->
+  io:format("SSA Gen server start called for ~p~n", [ModuleName]),
   Res = gen_server2:start(ssa_gen_server, [RegName, ModuleName, Args], Options),
   unwrap_start_result(Res).
 
 start_link(ModuleName, Args, Options) ->
+  io:format("SSA Gen server start called for ~p~n", [ModuleName]),
   Res = gen_server2:start_link(ssa_gen_server, [ModuleName, Args], Options),
   unwrap_start_result(Res).
 

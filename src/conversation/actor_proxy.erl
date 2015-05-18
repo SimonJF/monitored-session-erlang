@@ -279,12 +279,13 @@ handle_cast(Other, State) ->
   {noreply, State}.
 
 handle_info(Info, State) ->
-  %proxy_warn("Received unhandled info message ~p.", [Info], State),
+  proxy_warn("Received unhandled info message ~p.", [Info], State),
   ActorPid = State#proxy_state.actor_pid,
   ActorPid ! Info,
   {noreply, State}.
 
 terminate(_Reason, _State) ->
+  io:format("Proxy dead~n"),
   ok.
 
 code_change(_Old, State, _Extra) ->
