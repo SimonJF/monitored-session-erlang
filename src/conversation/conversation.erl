@@ -7,6 +7,7 @@
 %%% This is the outward-facing API for session initiation and monitoring.
 %%% Additionally, it contains functions to set up the scaffolding and
 %%% error kernel of the system, including registering server processes.
+%%%
 
 % Initialises the system. Must be called prior to doing anything else!
 initialise(SpecDir, Config) ->
@@ -16,63 +17,56 @@ initialise(SpecDir, Config) ->
 teardown() ->
   conversation_runtime_sup:teardown().
 
-send({Protocol, Role, ConvID, _PPID}, Recipients, MessageName, Types, Payload) ->
-  Res = conversation_instance:outgoing_message(Role, ConvID, Recipients,
-                                               MessageName, Types, Payload),
+send(ConvKey, Recipients, MessageName, Types, Payload) ->
+  Res = actor_monitor:send_message(ConvKey, Recipients, MessageName, Types,
+                                   Payload),
   case Res of
     ok -> ok;
     Err -> error(Err)
   end.
 
-call({Protocol, Role, ConvID, _}, Recipient, MessageName, Types, Payload) ->
-  Res = conversation_instance:do_call(ConvID, Role, Recipient, MessageName, Types,
-                                      Payload),
+call({P, R, C, MonitorPID}, Recipient, MessageName, _, Payload) ->
+  Res = actor_monitor:make_call(MonitorPID, P, R, C, Recipient,
+                                MessageName, Payload),
   case Res of
-    {ok, Result} -> Result;
-    {error, Err} -> error(Err)
+    ok -> ok;
+    Err -> error(Err)
   end.
 
-
 % Used to transition to another role.
-become({_, _, _, ProxyPID}, RegAtom, RoleName, Operation, Arguments) ->
-  do_become(ProxyPID, RegAtom, RoleName, Operation, Arguments);
-become(ProxyPID, RegAtom, RoleName, Operation, Arguments) ->
-  do_become(ProxyPID, RegAtom, RoleName, Operation, Arguments).
+become({_, _, _, MonitorPID}, RegAtom, RoleName, Operation, Arguments) ->
+  actor_monitor:become(MonitorPID, RegAtom, RoleName, Operation, Arguments).
 
-do_become(ProxyPID, RegAtom, RoleName, Operation, Arguments) ->
-  actor_proxy:become(ProxyPID, RegAtom, RoleName, Operation, Arguments).
-
-register_conversation(RegAtom, {ProtocolName, RoleName, ConvID, ProxyPID}) ->
-  actor_proxy:register_become(ProxyPID, RegAtom, ProtocolName, RoleName, ConvID).
+register_conversation(RegAtom, {ProtocolName, RoleName, ConvID, MonitorPID}) ->
+  actor_monitor:register_become(MonitorPID, RegAtom, ProtocolName, RoleName, ConvID).
 
 % Starts a conversation, assigning the initiator to the given role.
-start_conversation(ProxyPID, ProtocolName, Role) ->
+start_conversation(MonitorPID, ProtocolName, Role) ->
   % Retrieve the role names from the protocol reg server
   % Start a new conversation instance
   error_logger:info_msg("Starting conversation for protocol ~s.~n",
                          [ProtocolName]),
   RoleRes = protocol_registry:get_roles(ProtocolName),
-  MonitorRes = protocol_registry:get_monitors(ProtocolName),
-  case {RoleRes, MonitorRes} of
-    {{ok, Roles}, {ok, Monitors}} ->
+  case RoleRes of
+    {ok, Roles} ->
       % Next, need to start a new conversation process
-      ConversationProc = conversation_instance:start(ProtocolName, Roles, Monitors),
+      ConversationProc = conversation_instance:start(ProtocolName, Roles),
       case ConversationProc of
         % And start the invitation system
         {ok, ConvPID} ->
-          protocol_registry:start_invitation(ProtocolName, ConvPID, Role, ProxyPID);
+          protocol_registry:start_invitation(ProtocolName, ConvPID, Role, MonitorPID);
         Err ->
-          actor_proxy:conversation_setup_failed(ProxyPID, ProtocolName,
-                                                Role, {bad_conversation_process, Err})
+          actor_monitor:conversation_setup_failed(MonitorPID, ProtocolName,
+                                                  Role, {bad_conversation_process, Err})
       end;
     Err ->
-      actor_proxy:conversation_setup_failed(ProxyPID, ProtocolName, Role,
+      actor_monitor:conversation_setup_failed(MonitorPID, ProtocolName, Role,
                                               {bad_role, Err})
   end,
   ok.
 
-invite(ConvKey, InviteeProxyPID, InviteeRoleName) ->
-  actor_proxy:invite(ConvKey, InviteeProxyPID, InviteeRoleName).
+invite(ConvKey, InviteeMonitorPID, InviteeRoleName) ->
+  actor_monitor:invite(ConvKey, InviteeMonitorPID, InviteeRoleName).
 
 end_conversation({_, _, ConvID, _}, Reason) ->
   conversation_instance:end_conversation(ConvID, Reason).
