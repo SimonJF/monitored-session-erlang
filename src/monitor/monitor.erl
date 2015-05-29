@@ -295,3 +295,70 @@ call_response(Message, MonitorInstance) ->
 
 role_name(MonitorInstance) ->
   MonitorInstance#monitor_instance.role_name.
+
+
+%% Gets the roles involved at a certain node
+roles_involved({NodeType, _, {Recipient,  _, _}})
+  when (NodeType == receive_node) or
+       (NodeType == call_request_send_node) or
+       (NodeType == call_request_recv_node) or
+       (NodeType == call_response_send_node) or
+       (NodeType == call_response_recv_node) ->
+  [Recipient];
+roles_involved({NodeType, _, {Recipients,  _, _}})
+  when (NodeType == send_node) -> Recipients;
+roles_involved(_Other) -> [].
+
+%outgoing_transitions({_NodeType, Id, _Info}, MonitorInstance) ->
+%  Transitions = MonitorInstance#monitor_instance.transitions,
+  % If a state has no outgoing transitions, it may not be in the transition table.
+  % That's fine -- just return the empty list.
+%  FindResult = orddict:find(Id, Transitions),
+
+generate_reachability_dict(MonitorInstance) ->
+  {_, Res} = reachable_from_inner(0, MonitorInstance, orddict:new(), sets:new()),
+  Res.
+
+reachable_from_inner(NodeID, MonitorInstance, Dict, Visited) ->
+  % This will happen when we've visited the node before, but haven't necessarily
+  % finished calculating the result for it (ie with recursion).
+  % Simply return the empty set (it will be calculated once the call returns)
+  io:format("Visiting node ~p...~n", [NodeID]),
+  IsElement = sets:is_element(NodeID, Visited),
+  if IsElement ->
+       {sets:new(), Dict};
+     true ->
+       TransitionList =
+        case orddict:find(NodeID, MonitorInstance#monitor_instance.transitions) of
+          {ok, Transitions} -> sets:to_list(Transitions);
+          error -> []
+        end,
+       Node = orddict:fetch(NodeID, MonitorInstance#monitor_instance.states),
+       {_Ty, Id, _Info} = Node,
+       % Firstly, check whether the reachable set is already in the dict.
+       % If so, we can just return it.
+       case orddict:find(Id, Dict) of
+         {ok, ReachableSet} -> {ReachableSet, Dict};
+         error ->
+           % Right, if not...
+           % Add the item to the visited set
+           NewVisitedSet = sets:add_element(Id, Visited),
+           % Get the roles involved with this role
+           RolesInvolved = sets:from_list(roles_involved(Node)),
+           io:format("Roles involved: ~p...~n", [sets:to_list(RolesInvolved)]),
+
+           % Update the table for all outgoing transitions
+           {RolesInOutgoing, NewDict} =
+             lists:foldr(fun(NextID, {WorkingSet, WorkingDict}) ->
+                            {ReachableOutgoingSet, NextDict} =
+                              reachable_from_inner(NextID, MonitorInstance,
+                                            WorkingDict, NewVisitedSet),
+                              {sets:union(WorkingSet, ReachableOutgoingSet), NextDict} end,
+                         {sets:new(), Dict}, TransitionList),
+           % Now, add this node to the dictionary
+           RolesInvolved1 = sets:union(RolesInvolved, RolesInOutgoing),
+           NewDict1 = orddict:store(Id, RolesInvolved1, NewDict),
+           {RolesInvolved1, NewDict1}
+       end
+  end.
+

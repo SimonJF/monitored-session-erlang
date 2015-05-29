@@ -108,10 +108,20 @@ node_type({local_invites, _, _}) -> new_scope;
 node_type(_Other) -> io:format("Other: ~p~n", [_Other]),
                      other.
 
+print_reachability(States, Transitions) ->
+  io:format("Printing reachability...~n"),
+  MonitorInstance = monitor:create_monitor_instance("", "", States, Transitions),
+  ReachabilityDict = monitor:generate_reachability_dict(MonitorInstance),
+  ReachabilityDictList = orddict:to_list(ReachabilityDict),
+  lists:foreach(fun ({StateNum, Set}) ->
+                    List = sets:to_list(Set),
+                    io:format("~p: ~p~n", [StateNum, List]) end,
+                ReachabilityDictList).
 
 % Internal quick 'n' easy test harness
 % Will probably delete this at some point
 test_fsm(Filename) ->
+  io:format("In test_fsm~n"),
   ParseResult = scribble_lexer:parse(Filename),
   case ParseResult of
     {error, file_open_error, Error} ->
@@ -127,7 +137,8 @@ test_fsm(Filename) ->
                                   {ok, ProtocolName, {ok, {_RID, States, Transitions}}} ->
                                     io:format("Monitor for local protocol ~s:~n", [ProtocolName]),
                                     print_fsm(States, Transitions),
-                                    graphviz_out(States, Transitions);
+                                    graphviz_out(States, Transitions),
+                                    print_reachability(States, Transitions);
                                   {ok, ProtocolName, Error} ->
                                     io:format("Error generating monitor for local protocol ~s:~n~p~n",
                                               [ProtocolName, Error]);
