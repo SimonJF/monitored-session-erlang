@@ -12,7 +12,10 @@
                      monitors, % (RoleName, ConversationID) |-> Monitor
                      routing_table, % ConversationID |-> [(Role, Monitor PID)]
                      queued_messages, % Message ID |-> Message
-                     pending_calls % Call ID |-> Monitor, post-send
+                     pending_calls, % Call ID |-> Monitor, post-send
+                     failure_detection_strategy, % Either push or pull
+                     participant_monitor_refs % {Conv ID, Role} |-> Monitor reference
+                                              % Used for push-based detection.
                     }).
 
 % New monitor state
@@ -54,7 +57,7 @@ monitor_error(Format, Args, State) ->
 monitor_info(Format, Args, State) ->
   log_msg(fun error_logger:info_msg/2, Format, Args, State).
 
-fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap) ->
+fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap, FailureDetectionStrategy) ->
   #monitor_state{actor_pid=ActorPid,
               actor_type_name=ActorTypeName, % Name of the attached actor type
               active_protocols=orddict:new(),
@@ -64,7 +67,9 @@ fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap) ->
               clean_monitors=orddict:new(),
               routing_table=orddict:new(),
               queued_messages=orddict:new(),
-              pending_calls=orddict:new()
+              pending_calls=orddict:new(),
+              failure_detection_strategy=FailureDetectionStrategy,
+              participant_monitor_refs=orddict:new()
              }.
 
 load_monitors([], MonitorDict, _) ->
@@ -92,7 +97,7 @@ load_protocol_monitors(ProtocolName, [Role|Roles], MonitorDict, State) ->
 % Initialises the basic monitor state with some default values.
 init([ActorPid, ActorTypeName, ProtocolRoleMap]) ->
   % Firstly, create a fresh state with all of the information we've been given
-  State = fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap),
+  State = fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap, pull), % TODO: Don't hardcode pull
   % Next, we load the monitors.
   MonitorDict = load_monitors(orddict:to_list(ProtocolRoleMap),
                               orddict:new(),
@@ -146,10 +151,9 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
           NewMonitors = orddict:store({ConversationID, RoleName},
                                       FreshMonitor, Monitors),
 
-          % TODO: Try-Catch round this, in case the conversation goes away
           Res = gen_server2:call(ConversationID, {accept_invitation, RoleName}),
           case Res of
-            % Now, add the <Protocol, Role, CID> |-> Monitor mapping
+            % Now, add the <CID, Role> |-> Monitor mapping
             ok -> {ok, State#monitor_state{active_protocols=NewActiveProtocols,
                                         monitors=NewMonitors}};
             {error, Err} -> {error, Err}
@@ -159,6 +163,37 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
       end;
     {_, true, _} -> {error, already_fulfilled};
     _Other -> {error, cannot_fulfil}
+  end.
+
+% Creates an Erlang monitor for the participant. Not a MST monitor!
+% This helps us do push-based failure detection.
+% We get a monitor reference back, and whenever the process dies,
+% we receive a DOWN notification (which we trap).
+% ConvID: PID of conversation
+% RoleName: Role we're monitoring
+% Endpoint: PID of role inhabitant
+erlang_monitor_participant(ConvID, RoleName, Endpoint, State) ->
+  MonitorRef = erlang:monitor(process, Endpoint),
+  ParticipantMonitors = State#monitor_state.participant_monitor_refs,
+  NewParticipantMonitors = orddict:store({ConvID, RoleName},
+                                         MonitorRef, ParticipantMonitors),
+  State#monitor_state{participant_monitor_refs=NewParticipantMonitors}.
+
+monitored_participant_down(ConvID, RoleName, State) ->
+  % Begin voting.
+  conversation_instance:begin_continuation_safety_check(ConvID, RoleName).
+
+% Handle a request from the server, checking whether or not the role is needed
+% from the point of view of this participant in the rest of the protocol
+handle_check_participant(ConvID, RoleName, State) ->
+  Monitors = State#monitor_state.monitors,
+  MonitorRes = orddict:find({ConvID, RoleName}, Monitors),
+  case MonitorRes of
+    {ok, MonitorInstance} ->
+      monitor:is_role_reachable(RoleName, MonitorInstance);
+    error ->
+      % Role's not involved in this local protocol at all
+      false
   end.
 
 
@@ -517,6 +552,10 @@ handle_incoming_call_resp(ProtocolName, RoleName, ConvID, Message, From, State) 
       {reply, Err, State}
   end.
 
+handle_check_role_reachable(ConvID, LocalRoleName, TargetRoleName, State) ->
+  Monitors = State#monitor_state.monitors,
+  Monitor = orddict:fetch({ConvID, LocalRoleName}, Monitors),
+  monitor:is_role_reachable(TargetRoleName, Monitor).
 
 % Synchronous messages:
 %  * Invitation
@@ -554,6 +593,9 @@ handle_call({outgoing_call_resp, ProtocolName, RoleName, ConvID, Recipient,
                             Payload, From, State);
 handle_call({incoming_call_resp, ProtocolName, RoleName, ConvID, Message, From}, _, State) ->
   handle_incoming_call_resp(ProtocolName, RoleName, ConvID, Message, From, State);
+handle_call({check_role_reachable, ConvID, LocalRoleName, TargetRoleName}, _From, State) ->
+  Res = handle_check_role_reachable(ConvID, LocalRoleName, TargetRoleName, State),
+  {reply, Res, State};
 handle_call(Msg, From, State) ->
   io:format("Pass-through call: ~p~n", [Msg]),
   ActorPid = State#monitor_state.actor_pid,
@@ -605,6 +647,9 @@ code_change(_Old, State, _Extra) ->
 %%%%%%%%%%%%%%%%%%%
 %% API Functions %%
 %%%%%%%%%%%%%%%%%%%
+
+check_role_reachable(MonitorPID, ConvID, LocalRoleName, TargetRoleName) ->
+  gen_server2:call(MonitorPID, {check_role_reachable, ConvID, LocalRoleName, TargetRoleName}).
 
 deliver_message(MonitorPID, ProtocolName, RoleName, ConvID, Msg) ->
   gen_server2:cast(MonitorPID, {message, ProtocolName, RoleName, ConvID, Msg}).

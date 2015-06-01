@@ -1,4 +1,4 @@
--module(monitor).
+module(monitor).
 -compile(export_all).
 
 % monitor.erl: Functions for manipulating monitors.
@@ -12,7 +12,9 @@
                            role_name,
                            current_state = 0,
                            states,
-                           transitions}).
+                           transitions,
+                           reachability_dict
+                          }).
 
 % Public-facing API to create a monitor instance for the given Scribble
 % file, protocol name, and role name.
@@ -362,4 +364,11 @@ reachable_from_inner(NodeID, MonitorInstance, Dict, CurrentReachableSet, Visited
            {RolesInvolved1, NewDict1}
        end
   end.
+
+is_role_reachable(RoleName, MonitorInstance) ->
+  CurrentState = MonitorInstance#monitor_instance.current_state,
+  ReachabilityDict = MonitorInstance#monitor_instance.reachability_dict,
+  ReachableRoles = orddict:fetch(CurrentState, ReachabilityDict),
+  sets:is_element(RoleName, ReachableRoles).
+
 

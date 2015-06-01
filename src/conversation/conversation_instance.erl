@@ -4,7 +4,8 @@
 
 -record(conv_inst_state, {protocol_name,
                           role_mapping,
-                          setup_complete_broadcast
+                          setup_complete_broadcast,
+                          participant_monitor_refs
                          }).
 
 % Essentially a routing table for the conversation instance.
@@ -28,6 +29,20 @@ conversation_error(Format, Args, State) ->
 conversation_info(Format, Args, State) ->
   log_msg(fun error_logger:info_msg/2, Format, Args, State).
 
+
+% Creates an Erlang monitor for the participant. Not a MST monitor!
+% This helps us do push-based failure detection.
+% We get a monitor reference back, and whenever the process dies,
+% we receive a DOWN notification (which we trap).
+% ConvID: PID of conversation
+% RoleName: Role we're monitoring
+% Endpoint: PID of role inhabitant
+erlang_monitor_participant(RoleName, Endpoint, State) ->
+  MonitorRef = erlang:monitor(process, Endpoint),
+  ParticipantMonitors = State#conv_inst_state.participant_monitor_refs,
+  NewParticipantMonitors = orddict:store(MonitorRef,
+                                         RoleName, ParticipantMonitors),
+  State#conv_inst_state{participant_monitor_refs=NewParticipantMonitors}.
 
 % Checks whether the conversation is complete, and sends out
 % "complete" messages if so
@@ -71,7 +86,8 @@ register_participant(RoleName, Sender, State) ->
   % Now check whether all non-transient roles have been
   % fulfilled, notifying actors if so
   NewState1 = check_conversation_setup_complete(NewState),
-  {reply, ok, NewState1}.
+  NewState2 = erlang_monitor_participant(RoleName, Sender, State),
+  {reply, ok, NewState2}.
 
 % Checks whether the role is transient in the rolespec or not.
 % Initial val is not_filled if it isn't, and not_filled_transient if it is.
@@ -90,7 +106,7 @@ fresh_state(ProtocolName, RoleNames) ->
                                              {RN, initial_filled_val({RN, RS})}
                                              end, RoleNames)),
   #conv_inst_state{protocol_name=ProtocolName, role_mapping=EmptyMap,
-                   setup_complete_broadcast=false}.
+                   setup_complete_broadcast=false, participant_monitor_refs=orddict:new()}.
 
 handle_end_conversation(Reason, State) ->
   % Only send one notification per actor.
@@ -103,10 +119,37 @@ handle_end_conversation(Reason, State) ->
   exit(normal),
   {noreply, State}.
 
+handle_begin_continuation_safety_check(MonitorRef, State) ->
+  RoleMapping = State#conv_inst_state.role_mapping,
+  ParticipantMonitorRefs = State#conv_inst_state.participant_monitor_refs,
+  case orddict:find(MonitorRef, ParticipantMonitorRefs) of
+    {ok, RoleName} ->
+      % Iterate over each -- should a node fail, ignore it, it'll be picked up later
+      UsedInRemainder =
+        orddict:fold(fun(LocalRole, Endpoint, Acc) ->
+                       Res = case (catch (actor_monitor:check_role_reachable(Endpoint, self(),
+                                                                 LocalRole, RoleName))) of
+                         true -> true;
+                         false -> false;
+                         _Other -> false
+                       end,
+                       Res or Acc end, false, RoleMapping),
+      % Now, if Res is false, then the dead role's not reachable from anywhere.
+      % In which case, celebrate, we can continue as normal.
+      % If not, we'll need to do some stuff. For now, we can end the session.
+      if UsedInRemainder ->
+           end_conversation(self(), {role_offline, RoleName});
+         not UsedInRemainder -> ok
+      end;
+    error -> ok
+  end.
+
 
 
 % Callbacks...
-init([ProtocolName, RoleSpecs]) -> {ok, fresh_state(ProtocolName, RoleSpecs)}.
+init([ProtocolName, RoleSpecs]) ->
+  process_flag(trap_exit, true),
+  {ok, fresh_state(ProtocolName, RoleSpecs)}.
 
 handle_call({accept_invitation, RoleName}, {Sender, _}, State) ->
   register_participant(RoleName, Sender, State);
@@ -114,13 +157,18 @@ handle_call(Other, Sender, State) ->
   conversation_warn("Unhandled sync message ~w from ~p", [Other, Sender], State),
   {noreply, State}.
 
+%handle_cast({begin_continuation_safety_check, RoleName}, State) ->
+%  handle_begin_continuation_safety_check(RoleName, State),
+%  {noreply, State};
 handle_cast({end_conversation, Reason}, State) ->
   handle_end_conversation(Reason, State);
 handle_cast(Other, State) ->
   conversation_warn("Unhandled async message ~w.", [Other], State),
   {noreply, State}.
 
-
+handle_info({'DOWN', MonitorRef, _, _DownPID, _Reason}, State) ->
+  handle_begin_continuation_safety_check(MonitorRef, State),
+  {noreply, State};
 handle_info(Msg, State) ->
   conversation_warn("Unhandled Info message ~w.", [Msg], State),
   {noreply, State}.
@@ -138,3 +186,5 @@ start(ProtocolName, Roles) ->
 end_conversation(ConvID, Reason) ->
   gen_server2:cast(ConvID, {end_conversation, Reason}).
 
+%begin_continuation_safety_check(ConvID, RoleName) ->
+%  gen_server2:cast(ConvID, {begin_continuation_safety_check, RoleName}).
