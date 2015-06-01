@@ -316,17 +316,17 @@ roles_involved(_Other) -> [].
 %  FindResult = orddict:find(Id, Transitions),
 
 generate_reachability_dict(MonitorInstance) ->
-  {_, Res} = reachable_from_inner(0, MonitorInstance, orddict:new(), sets:new()),
+  {_, Res} = reachable_from_inner(0, MonitorInstance, orddict:new(), sets:new(), sets:new()),
   Res.
 
-reachable_from_inner(NodeID, MonitorInstance, Dict, Visited) ->
+reachable_from_inner(NodeID, MonitorInstance, Dict, CurrentReachableSet, Visited) ->
   % This will happen when we've visited the node before, but haven't necessarily
   % finished calculating the result for it (ie with recursion).
   % Simply return the empty set (it will be calculated once the call returns)
   io:format("Visiting node ~p...~n", [NodeID]),
   IsElement = sets:is_element(NodeID, Visited),
   if IsElement ->
-       {sets:new(), Dict};
+       {CurrentReachableSet, Dict};
      true ->
        TransitionList =
         case orddict:find(NodeID, MonitorInstance#monitor_instance.transitions) of
@@ -352,7 +352,8 @@ reachable_from_inner(NodeID, MonitorInstance, Dict, Visited) ->
              lists:foldr(fun(NextID, {WorkingSet, WorkingDict}) ->
                             {ReachableOutgoingSet, NextDict} =
                               reachable_from_inner(NextID, MonitorInstance,
-                                            WorkingDict, NewVisitedSet),
+                                            WorkingDict, sets:union(CurrentReachableSet, RolesInvolved),
+                                            NewVisitedSet),
                               {sets:union(WorkingSet, ReachableOutgoingSet), NextDict} end,
                          {sets:new(), Dict}, TransitionList),
            % Now, add this node to the dictionary
