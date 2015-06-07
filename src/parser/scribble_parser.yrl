@@ -81,7 +81,8 @@ localinvites
 localsendcallreq
 localrecvcallreq
 localsendcallresp
-localrecvcallresp.
+localrecvcallresp
+localsubsession.
 
 
 
@@ -95,7 +96,8 @@ left_brace right_brace left_bracket right_bracket left_square_bracket
 right_square_bracket colon forward_slash back_slash dot hash ampersand
 question_mark exlamation_mark underscore comma semicolon less_than greater_than
 ident ext_ident transient_kw invitation_kw for_kw send_call_request_kw
-send_call_response_kw receive_call_request_kw receive_call_response_kw.
+send_call_response_kw receive_call_request_kw receive_call_response_kw
+subsession_kw new_kw.
 
 
 % Module is the root symbol.
@@ -228,6 +230,7 @@ roleinstantiationlistinner -> comma roleinstantiation roleinstantiationlistinner
 
 
 roleinstantiation -> identifier : scribble_ast:role_instantiation('$1').
+roleinstantiation -> new_kw identifier : scribble_ast:new_role_instantiation('$1').
 roleinstantiation -> identifier as_kw identifier : scribble_ast:role_instantiation('$1', '$3').
 
 argumentlist -> less_than argument argumentlistinner greater_than :
@@ -413,6 +416,9 @@ localsendcallresp -> send_call_response_kw messagesignature to_kw identifier sem
 
 localrecvcallresp -> receive_call_response_kw messagesignature from_kw identifier semicolon:
   scribble_ast:local_call_response_recv('$2', '$4').
+
+localsubsession -> subsession_kw identifier roleinstantiationlist semicolon:
+  scribble_ast:local_subsession('$2', '$3').
 
 Erlang code.
 unwrap({_, V}) -> V;

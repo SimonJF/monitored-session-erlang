@@ -2,10 +2,15 @@
 -compile(export_all).
 -behaviour(gen_server2).
 
+-record(subsession_state, {initiator_pid,
+                           initiator_role,
+                           parent_conv_id}).
+
 -record(conv_inst_state, {protocol_name,
                           role_mapping,
                           setup_complete_broadcast,
-                          participant_monitor_refs
+                          participant_monitor_refs,
+                          subsession_state
                          }).
 
 % Essentially a routing table for the conversation instance.
@@ -56,9 +61,24 @@ check_conversation_setup_complete(State) ->
   % If it is complete, broadcast the conv setup complete message
   if not AlreadySetup andalso SetupComplete ->
       broadcast_conv_setup(State),
+      notify_subsession_established(State),
       State#conv_inst_state{setup_complete_broadcast=true};
     true -> State
   end.
+
+
+notify_subsession_established(State) ->
+  SubsessionState = State#conv_inst_state.subsession_state,
+  if SubsessionState =/= undefined ->
+       InitiatorPID = SubsessionState#subsession_state.initiator_pid,
+       InitiatorRole = SubsessionState#subsession_state.initiator_role,
+       ParentConvID = SubsessionState#subsession_state.parent_conv_id,
+       actor_monitor:subsession_established(InitiatorPID, ParentConvID, InitiatorRole, self());
+     true ->
+       ok
+  end.
+
+
 
 broadcast_conv_setup(State) ->
   ProtocolName = State#conv_inst_state.protocol_name,
@@ -74,7 +94,6 @@ broadcast_conv_setup(State) ->
 register_participant(RoleName, Sender, State) ->
   RoleMap = State#conv_inst_state.role_mapping,
   IsKey = orddict:is_key(RoleName, RoleMap),
-  % TODO: Possibly take more drastic action? Or just ignore...
   NewRoleMap = if IsKey ->
                     orddict:store(RoleName, Sender, RoleMap);
                   not IsKey ->
@@ -86,7 +105,7 @@ register_participant(RoleName, Sender, State) ->
   % Now check whether all non-transient roles have been
   % fulfilled, notifying actors if so
   NewState1 = check_conversation_setup_complete(NewState),
-  NewState2 = erlang_monitor_participant(RoleName, Sender, State),
+  NewState2 = erlang_monitor_participant(RoleName, Sender, NewState1),
   {reply, ok, NewState2}.
 
 % Checks whether the role is transient in the rolespec or not.
@@ -98,6 +117,9 @@ initial_filled_val({RoleName, {local_protocol, _, _, _, Roles, _}}) ->
                      true -> Acc
                   end end, not_filled, Roles).
 
+%-record(subsession_state, {initiator_pid,
+%                           initiator_role,
+%                           parent_conv_id}).
 
 fresh_state(ProtocolName, RoleNames) ->
   % Add the names to the map, so we can ensure we accept only roles which are
@@ -106,7 +128,13 @@ fresh_state(ProtocolName, RoleNames) ->
                                              {RN, initial_filled_val({RN, RS})}
                                              end, RoleNames)),
   #conv_inst_state{protocol_name=ProtocolName, role_mapping=EmptyMap,
-                   setup_complete_broadcast=false, participant_monitor_refs=orddict:new()}.
+                   setup_complete_broadcast=false, participant_monitor_refs=orddict:new(),
+                   subsession_state=undefined}.
+fresh_state(ProtocolName, RoleNames, ParentConvID, InitiatorPID, InitiatorRole) ->
+  State = fresh_state(ProtocolName, RoleNames),
+  SubsessionState = #subsession_state{initiator_pid=InitiatorPID, initiator_role=InitiatorRole,
+                                      parent_conv_id=ParentConvID},
+  State#conv_inst_state{subsession_state=SubsessionState}.
 
 handle_end_conversation(Reason, State) ->
   % Only send one notification per actor.
@@ -144,15 +172,62 @@ handle_begin_continuation_safety_check(MonitorRef, State) ->
     error -> ok
   end.
 
+handle_get_endpoints(RoleList, State) ->
+  RoleMapping = State#conv_inst_state.role_mapping,
+  lists:map(fun(Role) -> {Role, orddict:fetch(Role, RoleMapping)} end, RoleList).
 
+% InternalRoles : [Role]
+% ExternalInvitations : [{Role, Endpoint}]
+handle_send_subsession_invitations(InternalRoles, ExternalInvitations, State) ->
+  % Load everything we need from the state
+  SubsessionState = State#conv_inst_state.subsession_state,
+  InitiatorPID = SubsessionState#subsession_state.initiator_pid,
+  InitiatorRole = SubsessionState#subsession_state.initiator_role,
+  ParentConvID = SubsessionState#subsession_state.parent_conv_id,
+
+  % Get the inhabitants of all internally-invited roles
+  InternalInvitations = conversation_instance:get_endpoints(ParentConvID, InternalRoles),
+
+  % InternalInvitations, ExternalInvitations: [{Role, Endpoint}]
+  InvitationList = InternalInvitations ++ ExternalInvitations,
+  ProtocolName = State#conv_inst_state.protocol_name,
+  % Invite everything in the invitation list
+  FailList = lists:foldr(fun({Role, Endpoint}, FailList) ->
+                    try actor_monitor:incoming_invitation(Endpoint,
+                                                          ProtocolName,
+                                                          Role,
+                                                          self()) of
+                      ok ->
+                        % We're golden, it went through, and we'll get the response
+                        % soon.
+                        FailList
+                    catch
+                      _:Err ->
+                        error_logger:error_msg("Subsession invitation of role ~p failed: ~p~n",
+                                               [Role, Err]),
+                        [Role|FailList]
+                    end
+              end, [], InvitationList),
+  if length(FailList) == 0 ->
+       ok;
+     true ->
+       actor_monitor:subsession_establish_error(InitiatorPID, ParentConvID, InitiatorRole, self()),
+       end_conversation(self(), invitation_failed)
+  end.
 
 % Callbacks...
 init([ProtocolName, RoleSpecs]) ->
   process_flag(trap_exit, true),
-  {ok, fresh_state(ProtocolName, RoleSpecs)}.
+  {ok, fresh_state(ProtocolName, RoleSpecs)};
+init([ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole]) ->
+  process_flag(trap_exit, true),
+  {ok, fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole)}.
 
 handle_call({accept_invitation, RoleName}, {Sender, _}, State) ->
   register_participant(RoleName, Sender, State);
+handle_call({get_endpoints, RoleList}, _, State) ->
+  Res = handle_get_endpoints(RoleList, State),
+  {reply, Res, State};
 handle_call(Other, Sender, State) ->
   conversation_warn("Unhandled sync message ~w from ~p", [Other, Sender], State),
   {noreply, State}.
@@ -162,6 +237,9 @@ handle_call(Other, Sender, State) ->
 %  {noreply, State};
 handle_cast({end_conversation, Reason}, State) ->
   handle_end_conversation(Reason, State);
+handle_cast({start_subsession_invitations, InternalInvitations,
+             ExternalInvitations}, State) ->
+  handle_send_subsession_invitations(InternalInvitations, ExternalInvitations, State);
 handle_cast(Other, State) ->
   conversation_warn("Unhandled async message ~w.", [Other], State),
   {noreply, State}.
@@ -185,6 +263,17 @@ start(ProtocolName, Roles) ->
 
 end_conversation(ConvID, Reason) ->
   gen_server2:cast(ConvID, {end_conversation, Reason}).
+
+start_subsession(ProtocolName, Roles, ParentConvID, InitiatorPID, InitiatorRole) ->
+  gen_server2:start(conversation_instance, [ProtocolName, Roles, ParentConvID,
+                                            InitiatorPID, InitiatorRole], []).
+
+start_subsession_invitations(SubsessionID, InternalInvitations, ExternalInvitations) ->
+  gen_server2:cast(SubsessionID, {start_subsession_invitations, InternalInvitations,
+                                  ExternalInvitations}).
+
+get_endpoints(ConvID, RoleList) ->
+  gen_server2:call(ConvID, {get_endpoints, RoleList}).
 
 %begin_continuation_safety_check(ConvID, RoleName) ->
 %  gen_server2:cast(ConvID, {begin_continuation_safety_check, RoleName}).

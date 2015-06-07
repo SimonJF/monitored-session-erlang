@@ -75,6 +75,9 @@ SEND_CALL_REQ = send_call_request
 SEND_CALL_RESPONSE = send_call_response
 RECV_CALL_REQ = receive_call_request
 RECV_CALL_RESPONSE = receive_call_response
+SUBSESSIONKW = subsession
+NEWKW = new
+
 
 % --- Lexer Rules ---
 
@@ -113,6 +116,8 @@ Rules.
 {SEND_CALL_RESPONSE} : make_token(send_call_response_kw, TokenLine, TokenChars).
 {RECV_CALL_REQ} : make_token(receive_call_request_kw, TokenLine, TokenChars).
 {RECV_CALL_RESPONSE} : make_token(receive_call_response_kw, TokenLine, TokenChars).
+{SUBSESSIONKW} : make_token(subsession_kw, TokenLine, TokenChars).
+{NEWKW} : make_token(new_kw, TokenLine, TokenChars).
 
 
 

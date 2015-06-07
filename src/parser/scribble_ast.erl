@@ -56,6 +56,9 @@ transient_role_decl(Role, Alias) ->
 role_instantiation(Name) ->
   {role_instantiation, Name}.
 
+new_role_instantiation(Name) ->
+  {new_role_instantiation, Name}.
+
 role_instantiation(Name, Alias) ->
   {role_instantiation, Name, Alias}.
 

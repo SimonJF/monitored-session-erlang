@@ -114,10 +114,8 @@ invite_actor_role(RoleName, ConversationID, State) ->
 
 invite_actor_direct(RoleName, ActorMonitorPID, ConversationID, State) ->
   ProtocolName = protocol_name(State),
-  gen_server:call(ActorMonitorPID, {invitation,
-                                    ProtocolName,
-                                    RoleName,
-                                    ConversationID}).
+  actor_monitor:incoming_invitation(ActorMonitorPID, ProtocolName, RoleName,
+                                    ConversationID).
 
 init([ProtocolName, RoleSpecs, RoleMapping]) ->
   Monitors = generate_monitors(orddict:to_list(RoleSpecs), ProtocolName),

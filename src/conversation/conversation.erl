@@ -68,5 +68,9 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
 invite(ConvKey, InviteeMonitorPID, InviteeRoleName) ->
   actor_monitor:invite(ConvKey, InviteeMonitorPID, InviteeRoleName).
 
+
+subsession(ConvKey, ProtocolName, RoleMappings) ->
+  actor_monitor:start_subsession(ConvKey, ProtocolName, RoleMappings).
+
 end_conversation({_, _, ConvID, _}, Reason) ->
   conversation_instance:end_conversation(ConvID, Reason).

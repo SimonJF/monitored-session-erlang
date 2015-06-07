@@ -1,4 +1,4 @@
-module(monitor).
+-module(monitor).
 -compile(export_all).
 
 % monitor.erl: Functions for manipulating monitors.
