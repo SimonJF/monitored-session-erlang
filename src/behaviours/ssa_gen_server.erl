@@ -179,15 +179,15 @@ handle_cast({ssa_msg, Protocol, Role, ConversationID, MsgData}, State) ->
   UserState = State#actor_state.user_state,
   % TODO: ssactor_handle_message currently just returns a new state.
   % Should we have some more complex callback here instead?
-  NewUserState = Module:ssactor_handle_message(
-                   Protocol, Role, ConversationID, Sender, Op, Payload, UserState,
-                   {Protocol, Role, ConversationID, State#actor_state.monitor_pid}),
+  {ok, NewUserState} = Module:ssactor_handle_message(
+                        Protocol, Role, ConversationID, Sender, Op, Payload, UserState,
+                        {Protocol, Role, ConversationID, State#actor_state.monitor_pid}),
   {noreply, State#actor_state{user_state=NewUserState}};
 % Become
 handle_cast(_Msg = {become, Protocol, Role, Operation, Arguments, CID}, State) ->
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
-  NewUserState =
+  {ok, NewUserState} =
     Module:ssactor_become(Protocol, Role, Operation, Arguments,
                           {Protocol, Role, CID, State#actor_state.monitor_pid},
                           UserState),

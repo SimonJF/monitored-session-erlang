@@ -105,8 +105,9 @@ register_participant(RoleName, Sender, State) ->
   % Now check whether all non-transient roles have been
   % fulfilled, notifying actors if so
   NewState1 = check_conversation_setup_complete(NewState),
-  NewState2 = erlang_monitor_participant(RoleName, Sender, NewState1),
-  {reply, ok, NewState2}.
+  % TODO: Only do this if push-based
+  %NewState2 = erlang_monitor_participant(RoleName, Sender, NewState1),
+  {noreply, NewState}.
 
 % Checks whether the role is transient in the rolespec or not.
 % Initial val is not_filled if it isn't, and not_filled_transient if it is.
@@ -121,17 +122,17 @@ initial_filled_val({RoleName, {local_protocol, _, _, _, Roles, _}}) ->
 %                           initiator_role,
 %                           parent_conv_id}).
 
-fresh_state(ProtocolName, RoleNames) ->
+fresh_state(ProtocolName, RoleSpecs) ->
   % Add the names to the map, so we can ensure we accept only roles which are
   % meant to be accepted...
   EmptyMap = orddict:from_list(lists:map(fun({RN, RS}) ->
                                              {RN, initial_filled_val({RN, RS})}
-                                             end, RoleNames)),
+                                             end, RoleSpecs)),
   #conv_inst_state{protocol_name=ProtocolName, role_mapping=EmptyMap,
                    setup_complete_broadcast=false, participant_monitor_refs=orddict:new(),
                    subsession_state=undefined}.
-fresh_state(ProtocolName, RoleNames, ParentConvID, InitiatorPID, InitiatorRole) ->
-  State = fresh_state(ProtocolName, RoleNames),
+fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole) ->
+  State = fresh_state(ProtocolName, RoleSpecs),
   SubsessionState = #subsession_state{initiator_pid=InitiatorPID, initiator_role=InitiatorRole,
                                       parent_conv_id=ParentConvID},
   State#conv_inst_state{subsession_state=SubsessionState}.
@@ -223,8 +224,6 @@ init([ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole]) ->
   process_flag(trap_exit, true),
   {ok, fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole)}.
 
-handle_call({accept_invitation, RoleName}, {Sender, _}, State) ->
-  register_participant(RoleName, Sender, State);
 handle_call({get_endpoints, RoleList}, _, State) ->
   Res = handle_get_endpoints(RoleList, State),
   {reply, Res, State};
@@ -237,9 +236,12 @@ handle_call(Other, Sender, State) ->
 %  {noreply, State};
 handle_cast({end_conversation, Reason}, State) ->
   handle_end_conversation(Reason, State);
+handle_cast({accept_invitation, RoleName, Sender}, State) ->
+  register_participant(RoleName, Sender, State);
 handle_cast({start_subsession_invitations, InternalInvitations,
              ExternalInvitations}, State) ->
-  handle_send_subsession_invitations(InternalInvitations, ExternalInvitations, State);
+  handle_send_subsession_invitations(InternalInvitations, ExternalInvitations, State),
+  {noreply, State};
 handle_cast(Other, State) ->
   conversation_warn("Unhandled async message ~w.", [Other], State),
   {noreply, State}.
@@ -258,19 +260,23 @@ terminate(_Reason, _State) -> ok.
 %%%% API
 %%%%
 
-start(ProtocolName, Roles) ->
-  gen_server2:start(conversation_instance, [ProtocolName, Roles], []).
+start(ProtocolName, RoleSpecs) ->
+  gen_server2:start(conversation_instance, [ProtocolName, RoleSpecs], []).
 
 end_conversation(ConvID, Reason) ->
   gen_server2:cast(ConvID, {end_conversation, Reason}).
 
-start_subsession(ProtocolName, Roles, ParentConvID, InitiatorPID, InitiatorRole) ->
-  gen_server2:start(conversation_instance, [ProtocolName, Roles, ParentConvID,
+start_subsession(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole) ->
+  gen_server2:start(conversation_instance, [ProtocolName, RoleSpecs, ParentConvID,
                                             InitiatorPID, InitiatorRole], []).
 
 start_subsession_invitations(SubsessionID, InternalInvitations, ExternalInvitations) ->
   gen_server2:cast(SubsessionID, {start_subsession_invitations, InternalInvitations,
                                   ExternalInvitations}).
+
+accept_invitation(ConversationID, RoleName, ProcessID) ->
+  gen_server2:cast(ConversationID, {accept_invitation, RoleName, ProcessID}).
+
 
 get_endpoints(ConvID, RoleList) ->
   gen_server2:call(ConvID, {get_endpoints, RoleList}).

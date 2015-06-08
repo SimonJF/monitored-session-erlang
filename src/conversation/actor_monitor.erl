@@ -151,7 +151,7 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
           NewMonitors = orddict:store({ConversationID, RoleName},
                                       FreshMonitor, Monitors),
 
-          Res = gen_server2:call(ConversationID, {accept_invitation, RoleName}),
+          Res = conversation_instance:accept_invitation(ConversationID, RoleName, self()),
           case Res of
             % Now, add the <CID, Role> |-> Monitor mapping
             ok -> {ok, State#monitor_state{active_protocols=NewActiveProtocols,
@@ -553,13 +553,15 @@ check_subsession_roles_filled(InternalInvitations, ExternalInvitations, Protocol
   InternalRoles = sets:from_list(InternalInvitations),
   ExternalRoles = sets:from_list(lists:map(fun({R, _E}) -> R end, ExternalInvitations)),
   case RoleRes of
-    {ok, Roles} ->
+    {ok, RoleSpecs} ->
+      Roles = lists:map(fun({R, _}) -> R end, RoleSpecs),
       RoleSet = sets:from_list(Roles),
       InvitationSet = sets:union(InternalRoles, ExternalRoles),
       UnfilledRoles = sets:subtract(RoleSet, InvitationSet),
       UnfilledRolesSize = sets:size(UnfilledRoles),
+      io:format("Unfilled roles: ~p~n", [sets:to_list(UnfilledRoles)]),
       if UnfilledRolesSize == 0 ->
-           {ok, Roles};
+           {ok, RoleSpecs};
          true -> {error, {unfilled_roles, UnfilledRoles}}
       end;
     _Err -> {error, bad_protocol}
@@ -568,7 +570,7 @@ check_subsession_roles_filled(InternalInvitations, ExternalInvitations, Protocol
 
 
 handle_start_subsession(ProtocolName, InternalInvitations, ExternalInvitations,
-                        ParentConvID, State) ->
+                        ParentConvID, InitiatorRole, State) ->
   MonitorPID = self(),
   % TODO: Check against the monitor
   % Alright. First, we need to ensure that InternalInvitations U ExternalInvitations = Roles
@@ -577,16 +579,21 @@ handle_start_subsession(ProtocolName, InternalInvitations, ExternalInvitations,
                                      ProtocolName) of
     {ok, RoleSpecs} ->
       % Now, we can start the conversation process for the subsession
-      SubsessionProcRes = conversation_instance:start_subsession(ProtocolName, RoleSpecs, ParentConvID),
+      SubsessionProcRes = conversation_instance:start_subsession(ProtocolName, RoleSpecs, ParentConvID,
+                                                                 MonitorPID, InitiatorRole),
       case SubsessionProcRes of
         {ok, SubsessionPID} ->
           conversation_instance:start_subsession_invitations(SubsessionPID, InternalInvitations,
                                                              ExternalInvitations),
           {noreply, State};
         error ->
-          {{error, bad_subsession_proc}, State}
+          {noreply, State}
+          %{{error, bad_subsession_proc}, State}
       end;
-    Err -> {reply, Err, State}
+    Err ->
+      % TODO: Report this error!
+      {noreply, State}
+      % {noreply, Err, State}
   end.
 
 handle_subsession_initiation_result(_ParentConv, _InitiatorRole, _IsSuccess, _SubsessionPID, _State) ->
@@ -637,8 +644,6 @@ handle_call({incoming_call_resp, ProtocolName, RoleName, ConvID, Message, From},
 handle_call({check_role_reachable, ConvID, LocalRoleName, TargetRoleName}, _From, State) ->
   Res = handle_check_role_reachable(ConvID, LocalRoleName, TargetRoleName, State),
   {reply, Res, State};
-handle_call({start_subsession, ProtocolName, InternalInvitations, ExternalInvitations, ParentConvID}, _From, State) ->
-  handle_start_subsession(ProtocolName, InternalInvitations, ExternalInvitations, ParentConvID, State);
 handle_call(Msg, From, State) ->
 %  io:format("Pass-through call: ~p~n", [Msg]),
   ActorPid = State#monitor_state.actor_pid,
@@ -674,6 +679,11 @@ handle_cast({subsession_initiation_result, ParentConvID, InitiatorRole,
   handle_subsession_initiation_result(ParentConvID, InitiatorRole, IsSuccess,
                                       SubsessionPID, State),
   {noreply, State};
+handle_cast({start_subsession, ProtocolName, InternalInvitations, ExternalInvitations,
+             ParentConvID, InitiatorRole}, State) ->
+  handle_start_subsession(ProtocolName, InternalInvitations, ExternalInvitations,
+                          ParentConvID, InitiatorRole, State);
+
 handle_cast(Other, State) ->
   monitor_warn("Received unhandled cast message ~p.", [Other], State),
   ActorPid = State#monitor_state.actor_pid,
@@ -731,7 +741,7 @@ incoming_invitation(MonitorPID, ProtocolName, RoleName, ConversationID) ->
 % External: [{Role, Endpoint}]
 % Returns: {ok, SubsessionID} | {error, Err}
 start_subsession({_PName, RName, CID, MonitorPID}, ProtocolName, InternalInvitations, ExternalInvitations) ->
-  gen_server2:call(MonitorPID, {start_subsession, ProtocolName, InternalInvitations, ExternalInvitations, CID}).
+  gen_server2:cast(MonitorPID, {start_subsession, ProtocolName, InternalInvitations, ExternalInvitations, CID, RName}).
 
 send_message({ProtocolName, RoleName, ConversationID, MonitorPID},
              Recipients, MessageName, Types, Payload) ->
