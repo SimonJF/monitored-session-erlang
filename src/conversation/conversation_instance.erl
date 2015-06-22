@@ -107,7 +107,7 @@ register_participant(RoleName, Sender, State) ->
   NewState1 = check_conversation_setup_complete(NewState),
   % TODO: Only do this if push-based
   %NewState2 = erlang_monitor_participant(RoleName, Sender, NewState1),
-  {noreply, NewState}.
+  {noreply, NewState1}.
 
 % Checks whether the role is transient in the rolespec or not.
 % Initial val is not_filled if it isn't, and not_filled_transient if it is.

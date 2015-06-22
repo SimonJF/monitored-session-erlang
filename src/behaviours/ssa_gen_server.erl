@@ -68,39 +68,19 @@ actor_info(Format, Args, State) ->
 
 
 % gen_server2 callbacks
-init([Module, UserArgs]) ->
-  ProtocolRoleMap = actor_type_registry:get_protocol_role_map(Module),
-  MonitorProcess = gen_server2:start_link(actor_monitor,
-                                         [self(),
-                                          Module,
-                                          ProtocolRoleMap], []),
-  finish_init(Module, UserArgs, MonitorProcess);
-init([RegName, Module, UserArgs]) ->
-  ProtocolRoleMap = actor_type_registry:get_protocol_role_map(Module),
-  MonitorProcess = gen_server2:start_link(
-                     RegName, actor_monitor,
-                     [self(), Module, ProtocolRoleMap], []),
-  finish_init(Module, UserArgs, MonitorProcess).
-
-
-finish_init(Module, UserArgs, MonitorProcess) ->
-  process_flag(trap_exit, true),
-  case MonitorProcess of
-    {ok, MonitorPid} ->
-      actor_type_registry:register_actor_instance(Module, MonitorPid),
-      UserState = Module:ssactor_init(UserArgs, MonitorPid),
-      {ok, #actor_state{actor_type_name=Module,
-                        monitor_pid=MonitorPid,
-                        user_state=UserState}};
-    Other ->
-      {error, {monitor_start_failed, Other}}
-  end.
+init([Module, UserArgs, MonitorPID]) ->
+  actor_type_registry:register_actor_instance(Module, MonitorPID),
+  UserState = Module:ssactor_init(UserArgs, MonitorPID),
+  {ok, #actor_state{actor_type_name=Module,
+                    monitor_pid=MonitorPID,
+                    user_state=UserState}}.
 
 
 % Delegate calls, casts (other than ssa internal messages), info messages
 % and termination messages to the actor.
 
 delegate_async(Fun, Msg, State) ->
+  %io:format("Delegating: ~p~n", [Msg]),
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
   UserResult = case Fun of
@@ -261,18 +241,10 @@ terminate(Reason, State) ->
   Module = State#actor_state.actor_type_name,
   MonitorPID = State#actor_state.monitor_pid,
   UserState = State#actor_state.user_state,
+  exit(MonitorPID, kill),
   actor_type_registry:deregister_actor_instance(Module, MonitorPID),
   Module:terminate(Reason, UserState),
   ok.
-
-
-% Gets the monitor PID to return to user code, as the user should
-% address all requests (even unmonitored ones) to the monitor, which
-% forwards the requests.
-unwrap_start_result({ok, ActorPid}) ->
-  MonitorPid = gen_server2:call(ActorPid, ssa_get_monitor_id),
-  {ok, MonitorPid};
-unwrap_start_result(Other) -> Other.
 
 % Internal API
 
@@ -286,10 +258,15 @@ incoming_call_request(ActorPID, ProtocolName, RoleName, ConvID, MonitorPID, Mess
   gen_server2:cast(ActorPID, {ssa_call_req, MonitorPID, ProtocolName, RoleName, ConvID,
              Message, From}).
 
+join_conversation_request(ActorPID, ProtocolName, RoleName, ConvID) ->
+  %io:format("JCR: Actor: ~p, PN: ~p, RN: ~p, CID: ~p~n",
+  %          [ActorPID, ProtocolName, RoleName, ConvID]),
+  gen_server2:call(ActorPID, {ssa_join_conversation, ProtocolName, RoleName, ConvID}).
 
 %%%%%%%%%%%%%
 %%%% API %%%%
 %%%%%%%%%%%%%
+
 conversation_ended(ActorPID, CID, Reason) ->
   gen_server2:cast(ActorPID, {conversation_ended, CID, Reason}).
 
@@ -306,20 +283,27 @@ reply(ServerRef, Message) ->
   gen_server2:reply(ServerRef, Message).
 
 start_link(ModuleName, Args, Options) ->
-  io:format("SSA Gen server start called for ~p~n", [ModuleName]),
-  Res = gen_server2:start_link(ssa_gen_server, [ModuleName, Args], Options),
-  unwrap_start_result(Res).
+  actor_monitor:start_link(ModuleName, Args, Options).
+%  io:format("SSA Gen server start called for ~p~n", [ModuleName]),
+%  Res = gen_server2:start_link(ssa_gen_server, [ModuleName, Args], Options),
+%  unwrap_start_result(Res).
 
 start_link(RegName, ModuleName, Args, Options) ->
-  Res = gen_server2:start_link(ssa_gen_server, [RegName, ModuleName, Args], Options),
-  unwrap_start_result(Res).
+  actor_monitor:start_link(RegName, ModuleName, Args, Options).
+%  Res = gen_server2:start_link(ssa_gen_server, [RegName, ModuleName, Args], Options),
+%  unwrap_start_result(Res).
 
 start(ModuleName, Args, Options) ->
-  Res = gen_server2:start(ssa_gen_server, [ModuleName, Args], Options),
-  unwrap_start_result(Res).
+  actor_monitor:start_link(ModuleName, Args, Options).
+%  Res = gen_server2:start(ssa_gen_server, [ModuleName, Args], Options),
+%  unwrap_start_result(Res).
 
 start(RegName, ModuleName, Args, Options) ->
-  Res = gen_server2:start(ssa_gen_server, [RegName, ModuleName, Args], Options),
-  unwrap_start_result(Res).
+  actor_monitor:start_link(RegName, ModuleName, Args, Options).
 
+%  Res = gen_server2:start(ssa_gen_server, [RegName, ModuleName, Args], Options),
+%  unwrap_start_result(Res).
+
+start_actor_process(ModuleName, Args, MonitorPID) ->
+  gen_server2:start_link(ssa_gen_server, [ModuleName, Args, MonitorPID], []).
 

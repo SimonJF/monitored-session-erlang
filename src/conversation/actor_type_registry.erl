@@ -43,8 +43,7 @@ actor_type_call(ActorTypeName, Message, ActorTypeRegistry) ->
   case get_actor_type_pid(ActorTypeName, ActorTypeRegistry) of
     {ok, ActorTypePid} ->
       gen_server2:call(ActorTypePid, Message);
-    Other ->
-      io:format("Other in actor_type_call: ~p~n", [Other]),
+    _Other ->
       {error, actor_type_not_registered}
   end.
 

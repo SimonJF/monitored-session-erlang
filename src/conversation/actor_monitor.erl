@@ -57,8 +57,8 @@ monitor_error(Format, Args, State) ->
 monitor_info(Format, Args, State) ->
   log_msg(fun error_logger:info_msg/2, Format, Args, State).
 
-fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap, FailureDetectionStrategy) ->
-  #monitor_state{actor_pid=ActorPid,
+fresh_state(ActorTypeName, ProtocolRoleMap, FailureDetectionStrategy) ->
+  #monitor_state{
               actor_type_name=ActorTypeName, % Name of the attached actor type
               active_protocols=orddict:new(),
               protocol_role_map=ProtocolRoleMap, % Roles for each protocol
@@ -81,6 +81,7 @@ load_monitors([{ProtocolName, RoleNames}|XS], MonitorDict, State) ->
 
 load_protocol_monitors(_ProtocolName, [], MonitorDict, _State) -> MonitorDict;
 load_protocol_monitors(ProtocolName, [Role|Roles], MonitorDict, State) ->
+  %io:format("Getting monitor for protocol name: ~p, Role: ~p~n", [ProtocolName, Role]),
   MonitorRes = protocol_registry:get_monitor(ProtocolName, Role),
   case MonitorRes of
     {ok, {ok, Monitor}} ->
@@ -94,16 +95,16 @@ load_protocol_monitors(ProtocolName, [Role|Roles], MonitorDict, State) ->
 
 
 
-% Initialises the basic monitor state with some default values.
-init([ActorPid, ActorTypeName, ProtocolRoleMap]) ->
+init([{ActorTypeName, Args}]) ->
+  ProtocolRoleMap = actor_type_registry:get_protocol_role_map(ActorTypeName),
   % Firstly, create a fresh state with all of the information we've been given
-  State = fresh_state(ActorPid, ActorTypeName, ProtocolRoleMap, pull), % TODO: Don't hardcode pull
   % Next, we load the monitors.
+  State = fresh_state(ActorTypeName, ProtocolRoleMap, pull), % TODO: Don't hardcode pull
   MonitorDict = load_monitors(orddict:to_list(ProtocolRoleMap),
                               orddict:new(),
                               State),
-  {ok, State#monitor_state{clean_monitors=MonitorDict}}.
-
+  {ok, ActorPID} = ssa_gen_server:start_actor_process(ActorTypeName, Args, self()),
+  {ok, State#monitor_state{actor_pid=ActorPID, clean_monitors=MonitorDict}}.
 
 
 % Called when we've been invited to fufil a role.
@@ -140,11 +141,8 @@ add_role(ProtocolName, RoleName, ConversationID, State) ->
     case {RoleFindRes, AlreadyFulfilled, FreshMonitorRes} of
     {true, false, {ok, FreshMonitor}} ->
       % We can theoretically fulfil it. Just need to ask the actor...
-      JoinRequestResult = gen_server2:call(ActorPID,
-                                          {ssa_join_conversation,
-                                           ProtocolName,
-                                           RoleName,
-                                           ConversationID}),
+      JoinRequestResult = ssa_gen_server:join_conversation_request(ActorPID, ProtocolName,
+                                                                   RoleName, ConversationID),
       case JoinRequestResult of
         accept ->
           NewActiveProtocols = orddict:append(ProtocolName, {RoleName, ConversationID}, ActiveProtocols),
@@ -238,7 +236,7 @@ deliver_messages_inner([Role|Roles], RoleMap, Protocol, RoleName, ConvID, Msg, {
                             Msg, {Ok, D, [RoleName|R], NF})
       catch
         _:Err ->
-          io:format("Error in queue message call: ~p~n", [Err]),
+          %io:format("Error in queue message call: ~p~n", [Err]),
           % Actor offline, add to Dead list
           deliver_messages_inner(Roles, RoleMap, Protocol, RoleName, ConvID,
                             Msg, {Ok, [RoleName|D], R, NF})
@@ -263,7 +261,7 @@ drop_outgoing_messages([EP|EPs], Msg) ->
 
 % Lookup the destination role, and forward to its monitor.
 deliver_outgoing_message(ProtocolName, RoleName, ConvID, Msg, State) ->
-  io:format("Message data: ~p~n", [Msg]),
+  %io:format("Message data: ~p~n", [Msg]),
   Recipients = message:message_recipients(Msg),
   GlobalRoutingTable = State#monitor_state.routing_table,
   ConvRoutingTable = orddict:fetch(ConvID, GlobalRoutingTable),
@@ -559,7 +557,7 @@ check_subsession_roles_filled(InternalInvitations, ExternalInvitations, Protocol
       InvitationSet = sets:union(InternalRoles, ExternalRoles),
       UnfilledRoles = sets:subtract(RoleSet, InvitationSet),
       UnfilledRolesSize = sets:size(UnfilledRoles),
-      io:format("Unfilled roles: ~p~n", [sets:to_list(UnfilledRoles)]),
+      %io:format("Unfilled roles: ~p~n", [sets:to_list(UnfilledRoles)]),
       if UnfilledRolesSize == 0 ->
            {ok, RoleSpecs};
          true -> {error, {unfilled_roles, UnfilledRoles}}
@@ -617,7 +615,7 @@ handle_call({send_msg, CurrentProtocol, CurrentRole, ConversationID, Recipients,
                             MessageName, Types, Payload, State),
   {reply, Reply, NewState};
 handle_call({queue_msg, ProtocolName, RoleName, ConvID, Msg}, _From, State) ->
-  io:format("In queue msg handler~n"),
+  %io:format("In queue msg handler~n"),
   {Res, NewState} = monitor_and_queue(ProtocolName, RoleName, ConvID, Msg, State),
   {reply, Res, NewState};
 handle_call({become, RoleName, RegAtom, Operation, Arguments}, _Sender, State) ->
@@ -645,7 +643,7 @@ handle_call({check_role_reachable, ConvID, LocalRoleName, TargetRoleName}, _From
   Res = handle_check_role_reachable(ConvID, LocalRoleName, TargetRoleName, State),
   {reply, Res, State};
 handle_call(Msg, From, State) ->
-%  io:format("Pass-through call: ~p~n", [Msg]),
+  %io:format("Pass-through call: ~p~n", [Msg]),
   ActorPid = State#monitor_state.actor_pid,
   Reply = gen_server2:call(ActorPid, {delegate_call, From, Msg}),
   {reply, Reply, State}.
@@ -664,7 +662,7 @@ handle_cast({drop_msg, MsgRef}, State) ->
   {noreply, State#monitor_state{queued_messages=NewQueuedMsgs}};
 handle_cast({ssa_session_established, ProtocolName, RoleName, ConvID, RoutingTable}, State) ->
   % Set the routing table for the session, and then forward the success message.
-  io:format("In ssa session est ~n"),
+  %io:format("In ssa session est ~n"),
   ActorPID = State#monitor_state.actor_pid,
   GlobalRoutingTable = State#monitor_state.routing_table,
   NewGlobalRoutingTable = orddict:store(ConvID, RoutingTable, GlobalRoutingTable),
@@ -795,3 +793,8 @@ subsession_terminated(MonitorPID, ParentConvID, InitiatorRole, SubsessionID) ->
   gen_server2:cast(MonitorPID, {subsession_terminated, ParentConvID, InitiatorRole,
                                 SubsessionID}).
 
+start_link(ActorTypeName, Args, Options) ->
+  gen_server2:start_link(actor_monitor, [{ActorTypeName, Args}], Options).
+
+start_link(RegName, ActorTypeName, Args, Options) ->
+  gen_server2:start_link(RegName, actor_monitor, [{ActorTypeName, Args}], Options).
