@@ -68,6 +68,14 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
 invite(ConvKey, InviteeMonitorPID, InviteeRoleName) ->
   actor_monitor:invite(ConvKey, InviteeMonitorPID, InviteeRoleName).
 
+set_conv_property({_, _, ConvID, _}, Key, Value) ->
+  conversation_instance:set_property(ConvID, Key, Value).
+
+unset_conv_property({_, _, ConvID, _}, Key) ->
+  conversation_instance:unset_property(ConvID, Key).
+
+get_conv_property({_, _, ConvID, _}, Key) ->
+  conversation_instance:get_property(ConvID, Key).
 
 subsession(ConvKey, ProtocolName, InternalInvitations, ExternalInvitations) ->
   % TODO: Proper error reporting

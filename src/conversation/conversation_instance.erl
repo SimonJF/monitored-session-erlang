@@ -6,11 +6,20 @@
                            initiator_role,
                            parent_conv_id}).
 
--record(conv_inst_state, {protocol_name,
-                          role_mapping,
-                          setup_complete_broadcast,
-                          participant_monitor_refs,
-                          subsession_state
+-record(conv_inst_state, {protocol_name,             %% Name of the protocol
+
+                          role_mapping,              %% Role |-> Endpoint mapping
+
+                          setup_complete_broadcast,  %% Flag: set to true when
+                                                     %% setup success msg sent
+
+                          participant_monitor_refs,  %% Monitor refs for roles:
+                                                     %% used in push-based FD
+
+                          conv_properties,           %% Per-conv properties.
+
+                          subsession_state           %% Extra info if this is a
+                                                     %% subsession
                          }).
 
 % Essentially a routing table for the conversation instance.
@@ -130,6 +139,7 @@ fresh_state(ProtocolName, RoleSpecs) ->
                                              end, RoleSpecs)),
   #conv_inst_state{protocol_name=ProtocolName, role_mapping=EmptyMap,
                    setup_complete_broadcast=false, participant_monitor_refs=orddict:new(),
+                   conv_properties=orddict:new(),
                    subsession_state=undefined}.
 fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole) ->
   State = fresh_state(ProtocolName, RoleSpecs),
@@ -138,8 +148,8 @@ fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole) 
   State#conv_inst_state{subsession_state=SubsessionState}.
 
 handle_end_conversation(Reason, State) ->
+  % TODO: Failure handler call goes here.
   % Only send one notification per actor.
-  % I think, for now, at least.
   RoleMappingList = orddict:to_list(State#conv_inst_state.role_mapping),
   PIDs = lists:map(fun({_, Pid}) -> Pid end, RoleMappingList),
   UniqList = sets:to_list(sets:from_list(PIDs)),
@@ -216,6 +226,20 @@ handle_send_subsession_invitations(InternalRoles, ExternalInvitations, State) ->
        end_conversation(self(), invitation_failed)
   end.
 
+handle_get_property(Key, State) ->
+  ConvProperties = State#conv_inst_state.conv_properties,
+  orddict:find(Key, ConvProperties).
+
+handle_set_property(Key, Value, State) ->
+  ConvProperties = State#conv_inst_state.conv_properties,
+  NewConvProperties = orddict:store(Key, Value, ConvProperties),
+  State#conv_inst_state{conv_properties=NewConvProperties}.
+
+handle_unset_property(Key, State) ->
+  ConvProperties = State#conv_inst_state.conv_properties,
+  NewConvProperties = orddict:erase(Key, ConvProperties),
+  State#conv_inst_state{conv_properties=NewConvProperties}.
+
 % Callbacks...
 init([ProtocolName, RoleSpecs]) ->
   process_flag(trap_exit, true),
@@ -227,6 +251,16 @@ init([ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole]) ->
 handle_call({get_endpoints, RoleList}, _, State) ->
   Res = handle_get_endpoints(RoleList, State),
   {reply, Res, State};
+handle_call({get_property, Key}, _, State) ->
+  Res = handle_get_property(Key, State),
+  {reply, Res, State};
+handle_call({set_property, Key, Value}, _, State) ->
+  NewState = handle_set_property(Key, Value, State),
+  {reply, ok, NewState};
+handle_call({unset_property, Key}, _, State) ->
+  NewState = handle_unset_property(Key, State),
+  {reply, ok, NewState};
+
 handle_call(Other, Sender, State) ->
   conversation_warn("Unhandled sync message ~w from ~p", [Other, Sender], State),
   {noreply, State}.
@@ -280,6 +314,15 @@ accept_invitation(ConversationID, RoleName, ProcessID) ->
 
 get_endpoints(ConvID, RoleList) ->
   gen_server2:call(ConvID, {get_endpoints, RoleList}).
+
+get_property(ConvID, Key) ->
+  gen_server2:call(ConvID, {get_property, Key}).
+
+set_property(ConvID, Key, Value) ->
+  gen_server2:call(ConvID, {set_property, Key, Value}).
+
+unset_property(ConvID, Key) ->
+  gen_server2:call(ConvID, {unset_property, Key}).
 
 %begin_continuation_safety_check(ConvID, RoleName) ->
 %  gen_server2:cast(ConvID, {begin_continuation_safety_check, RoleName}).
