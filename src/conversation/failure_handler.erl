@@ -1,7 +1,7 @@
 -module(failure_handler).
 -compile(export_all).
 
--record(failure_data, {conv_key,         %% Conversation Key
+-record(failure_data, {conv_id,         %% Conversation Key
                        alive_roles,      %% Roles alive at session termination
                        dead_roles,       %% Roles dead at session termination
                        conv_properties,  %% Per-conversation properties
@@ -11,13 +11,13 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%% Internal API
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-start_failure_handler(ConvKey,
+start_failure_handler(ConvID,
                       AliveRoles,
                       DeadRoles,
                       ConvProperties,
                       FailureReason,
                       HandlerFunction) ->
-  FailureData = #failure_data{conv_key=ConvKey, alive_roles=AliveRoles,
+  FailureData = #failure_data{conv_id=ConvID, alive_roles=AliveRoles,
                               dead_roles=DeadRoles,
                               conv_properties=ConvProperties,
                               failure_reason=FailureReason},
@@ -36,6 +36,8 @@ start_failure_handler(ConvKey,
 start_handler_session(FailureData,
                       ProtocolName, InternalInvitations, ExternalInvitations,
                       FailureHandlingFunction) ->
+  %conversation_instance:start_subsession(ProtocolName, InternalInvitations,
+  %                                       ExternalInvitations, 
   ok.
 
 start_handler_session(FailureData,

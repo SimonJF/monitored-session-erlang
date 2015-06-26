@@ -18,6 +18,8 @@
 
                           conv_properties,           %% Per-conv properties.
 
+                          failure_handler_function,  %% Failure handling function
+
                           subsession_state           %% Extra info if this is a
                                                      %% subsession
                          }).
@@ -148,15 +150,50 @@ fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole) 
   State#conv_inst_state{subsession_state=SubsessionState}.
 
 handle_end_conversation(Reason, State) ->
-  % TODO: Failure handler call goes here.
   % Only send one notification per actor.
   RoleMappingList = orddict:to_list(State#conv_inst_state.role_mapping),
   PIDs = lists:map(fun({_, Pid}) -> Pid end, RoleMappingList),
   UniqList = sets:to_list(sets:from_list(PIDs)),
   lists:foreach(fun(Pid) -> actor_monitor:conversation_ended(Pid, self(), Reason) end,
                 UniqList),
+
+  % Now that all actors have been notified, invoke failure handler
+  % to do any necessary rollbacks / compensation
+  FailureHandlerFn = State#conv_inst_state.failure_handler_function,
+  if Reason =/= normal ->
+       invoke_failure_handler(Reason, State, FailureHandlerFn);
+     Reason == normal ->
+       ok
+  end,
   exit(normal),
   {noreply, State}.
+
+% Given an actor-role mapping, pings each actor to check if alive or dead.
+get_role_alive_status(RoleEndpointMappingList) ->
+  get_role_alive_status_inner(RoleEndpointMappingList, {[], []}).
+
+get_role_alive_status_inner([], {Alive, Dead}) ->
+  {Alive, Dead};
+get_role_alive_status_inner([{R, E}|XS], {Alive, Dead}) ->
+  ActorAlive = actor_monitor:is_actor_alive(E),
+  if ActorAlive ->
+       get_role_alive_status_inner(XS, {[R|Alive], Dead});
+     not ActorAlive ->
+       get_role_alive_status_inner(XS, {Alive, [R|Dead]})
+  end.
+
+
+invoke_failure_handler(Reason, State, FailureHandlerFn) ->
+  % Get list of alive / dead roles
+  RoleMapping = State#conv_inst_state.role_mapping,
+  RoleMappingList = orddict:to_list(RoleMapping),
+  {AliveRoles, DeadRoles} = get_role_alive_status(RoleMappingList),
+
+  % Get properties, invoke failure handler
+  ConvProperties = State#conv_inst_state.conv_properties,
+  failure_handler:start_failure_handler(self(), AliveRoles, DeadRoles,
+                                        ConvProperties, Reason, FailureHandlerFn),
+  ok.
 
 handle_begin_continuation_safety_check(MonitorRef, State) ->
   RoleMapping = State#conv_inst_state.role_mapping,
@@ -243,7 +280,9 @@ handle_unset_property(Key, State) ->
 % Callbacks...
 init([ProtocolName, RoleSpecs]) ->
   process_flag(trap_exit, true),
-  {ok, fresh_state(ProtocolName, RoleSpecs)};
+  {ok, fresh_state(ProtocolName, RoleSpecs, undefined)};
+init([ProtocolName, RoleSpecs, FailureHandlerFn]) ->
+  {ok, fresh_state(ProtocolName, RoleSpecs, 
 init([ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole]) ->
   process_flag(trap_exit, true),
   {ok, fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole)}.
@@ -297,12 +336,20 @@ terminate(_Reason, _State) -> ok.
 start(ProtocolName, RoleSpecs) ->
   gen_server2:start(conversation_instance, [ProtocolName, RoleSpecs], []).
 
+start(ProtocolName, RoleSpecs, FailureHandlerFn) ->
+  gen_server2:start(conversation_instance, [ProtocolName, RoleSpecs, FailureHandlerFn], []).
+
 end_conversation(ConvID, Reason) ->
   gen_server2:cast(ConvID, {end_conversation, Reason}).
 
 start_subsession(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole) ->
   gen_server2:start(conversation_instance, [ProtocolName, RoleSpecs, ParentConvID,
                                             InitiatorPID, InitiatorRole], []).
+
+start_subsession(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole, FailureHandlingFn) ->
+  gen_server2:start(conversation_instance, [ProtocolName, RoleSpecs, ParentConvID,
+                                            InitiatorPID, InitiatorRole, FailureHandlingFn], []).
+
 
 start_subsession_invitations(SubsessionID, InternalInvitations, ExternalInvitations) ->
   gen_server2:cast(SubsessionID, {start_subsession_invitations, InternalInvitations,

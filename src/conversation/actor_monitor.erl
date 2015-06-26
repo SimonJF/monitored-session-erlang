@@ -642,6 +642,8 @@ handle_call({incoming_call_resp, ProtocolName, RoleName, ConvID, Message, From},
 handle_call({check_role_reachable, ConvID, LocalRoleName, TargetRoleName}, _From, State) ->
   Res = handle_check_role_reachable(ConvID, LocalRoleName, TargetRoleName, State),
   {reply, Res, State};
+handle_call(ping, _, State) ->
+  {reply, pong, State};
 handle_call(Msg, From, State) ->
   %io:format("Pass-through call: ~p~n", [Msg]),
   ActorPid = State#monitor_state.actor_pid,
@@ -798,3 +800,13 @@ start_link(ActorTypeName, Args, Options) ->
 
 start_link(RegName, ActorTypeName, Args, Options) ->
   gen_server2:start_link(RegName, actor_monitor, [{ActorTypeName, Args}], Options).
+
+
+is_actor_alive(MonitorPID) ->
+  try gen_server2:call(MonitorPID, ping) of
+    pong -> true
+  catch
+    _:_Err ->
+      false
+  end.
+
