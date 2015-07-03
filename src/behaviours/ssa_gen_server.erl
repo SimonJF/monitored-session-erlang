@@ -241,7 +241,7 @@ terminate(Reason, State) ->
   Module = State#actor_state.actor_type_name,
   MonitorPID = State#actor_state.monitor_pid,
   UserState = State#actor_state.user_state,
-  exit(MonitorPID, kill),
+  %exit(MonitorPID, kill),
   actor_type_registry:deregister_actor_instance(Module, MonitorPID),
   Module:terminate(Reason, UserState),
   ok.

@@ -134,7 +134,7 @@ initial_filled_val({RoleName, {local_protocol, _, _, _, Roles, _}}) ->
 %                           parent_conv_id}).
 
 fresh_state(ProtocolName, RoleSpecs) ->
-  % Add the names to the map, so we can ensure we accept only roles which are
+% Add the names to the map, so we can ensure we accept only roles which are
   % meant to be accepted...
   EmptyMap = orddict:from_list(lists:map(fun({RN, RS}) ->
                                              {RN, initial_filled_val({RN, RS})}
@@ -142,7 +142,13 @@ fresh_state(ProtocolName, RoleSpecs) ->
   #conv_inst_state{protocol_name=ProtocolName, role_mapping=EmptyMap,
                    setup_complete_broadcast=false, participant_monitor_refs=orddict:new(),
                    conv_properties=orddict:new(),
-                   subsession_state=undefined}.
+                   subsession_state=undefined
+                  }.
+
+fresh_state(ProtocolName, RoleSpecs, FailureHandlingFn) ->
+  State = fresh_state(ProtocolName, RoleSpecs),
+  State#conv_inst_state{failure_handler_function=FailureHandlingFn}.
+
 fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole) ->
   State = fresh_state(ProtocolName, RoleSpecs),
   SubsessionState = #subsession_state{initiator_pid=InitiatorPID, initiator_role=InitiatorRole,
@@ -281,8 +287,8 @@ handle_unset_property(Key, State) ->
 init([ProtocolName, RoleSpecs]) ->
   process_flag(trap_exit, true),
   {ok, fresh_state(ProtocolName, RoleSpecs, undefined)};
-init([ProtocolName, RoleSpecs, FailureHandlerFn]) ->
-  {ok, fresh_state(ProtocolName, RoleSpecs, 
+%init([ProtocolName, RoleSpecs, FailureHandlerFn]) ->
+%  {ok, fresh_state(ProtocolName, RoleSpecs, 
 init([ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole]) ->
   process_flag(trap_exit, true),
   {ok, fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole)}.
