@@ -223,7 +223,7 @@ generate_monitor({local_protocol, ProtocolName, ProjRoleName, _Params, _Roles, B
   Size = block_size(Block),
   RootScope = scope(ProtocolName ++ "@" ++ ProjRoleName, Block, Size, orddict:new()),
   MonitorGenState = fresh_outer_state(),
-  EvalRes = evaluate_nested_fsm(RootScope, MonitorGenState),
+  EvalRes = evaluate_nested_fsm(RootScope, 0, MonitorGenState),
   case EvalRes of
     {ok, MonitorGenState1} ->
       {ok, MonitorGenState1#outer_monitor_gen_state.nested_fsms};
@@ -244,17 +244,17 @@ add_end_node(InnerState) ->
 % Creates a nested FSM, adds it to the NestedFSMs list.
 % ID |-> (States, Transitions)
 % Increments the ID in the OuterState
-evaluate_nested_fsm(Scope, OuterState) ->
+evaluate_nested_fsm(Scope, FSMID, OuterState) ->
   % Create an outer monitor gen state.
   InnerState = fresh_inner_state(), % Root FSm
-  OuterState1 = update_nested_fsm(0, InnerState, OuterState),
+  OuterState1 = update_nested_fsm(FSMID, InnerState, OuterState),
   OuterState2 = increment_running_fsm_id(OuterState1),
 
   EvalRes = evaluate_scope(Scope, InnerState, OuterState2),
   case EvalRes of
     {InnerState1, OuterState3} ->
       InnerState2 = add_end_node(InnerState1),
-      {ok, update_nested_fsm(0, InnerState2, OuterState3)};
+      {ok, update_nested_fsm(FSMID, InnerState2, OuterState3)};
     %{EndID, States1, Transitions1} ->
     %  {ok, add_node(EndID, end_node(EndID), States1, Transitions1)};
     Other -> Other % Various monitor errors
@@ -374,20 +374,45 @@ evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, InnerState, OuterState, MuMa
           InnerState1 = update_inner_state(RID1, States1 ,Transitions2),
           {InnerState2, OuterState1} = evaluate_scope(RecScope, InnerState1, OuterState),
           evaluate_scope_inner(XS, EndIndex, InnerState2, OuterState1, MuMap);
-  %      {par, ParallelBlocks} ->
-  %        {RunningNestedFSMID1, NestedFSMs1, NestedFSMIDs} =
-  %          evaluate_parallel_blocks(ParallelBlocks, RunningNestedFSMID, NestedFSMs),
-  %          {RID, NewStates, Ts} = generate_node({par, ParallelBocks, NestedFSMIDs},
-  %                                               RunningID, States, Transitions),
-  %          NextIndex = calculate_next_index(ScopeBlock, RunningID, EndIndex, MuMap),
-  %          NewTransitions = add_transition(RunningID, NextIndex, Ts),
-  %          evaluate_scope_inner(XS, EndIndex, RID, NewStates, NewTransitions, MuMap);
+        {par, ParallelBlocks} ->
+          NestedFSMs = OuterState#outer_monitor_gen_state.nested_fsms,
+          RunningNestedFSMID = OuterState#outer_monitor_gen_state.running_nested_fsm_id,
+
+          {OuterState1, NestedFSMIDs, MuMap1} =
+            evaluate_parallel_blocks(ParallelBlocks, RunningNestedFSMID, NestedFSMs),
+          {RID, NewStates, Ts} = generate_node({par, ParallelBlocks, NestedFSMIDs},
+                                               RunningID, States, Transitions),
+          NextIndex = calculate_next_index(ScopeBlock, RunningID, EndIndex, MuMap1),
+          NewTransitions = add_transition(RunningID, NextIndex, Ts),
+          InnerState1 = update_inner_state(NextIndex, NewStates, NewTransitions),
+          evaluate_scope_inner(XS, EndIndex, InnerState1, OuterState, MuMap1);
         Other -> {error, monitor_gen, unsupported_node, Other}
       end;
      % Continue is taken care of in calculate_next_index
      tau_transition -> evaluate_scope_inner(XS, EndIndex, InnerState, OuterState, MuMap);
      Other -> {error, monitor_gen, unsupported_node_type, Other}
   end.
+
+
+evaluate_parallel_blocks(Blocks, OuterState, MuMap) ->
+  evaluate_parallel_blocks_inner(Blocks, OuterState, MuMap, []).
+
+evaluate_parallel_blocks_inner([], OuterState, BlockIDs, MuMap) ->
+  {OuterState, BlockIDs, MuMap};
+evaluate_parallel_blocks_inner([Block|ParallelBlocks], OuterState, BlockIDs, MuMap) ->
+  Size = block_size(Block),
+  FSMID = OuterState#outer_monitor_gen_state.running_nested_fsm_id,
+  ParScope = scope("Par" ++ integer_to_list(FSMID), Block, Size, MuMap),
+  MonitorGenState = fresh_outer_state(),
+  EvalRes = evaluate_nested_fsm(ParScope, FSMID, MonitorGenState),
+  case EvalRes of
+    {ok, NewOuterState} ->
+      evaluate_parallel_blocks_inner(ParallelBlocks, NewOuterState, [FSMID|BlockIDs], MuMap);
+      %{ok, MonitorGenState1#outer_monitor_gen_state.nested_fsms};
+    Other -> Other
+  end.
+
+
 
 
 % Generates a monitor node, given the AST of a projected local type.
