@@ -61,7 +61,7 @@ current_monitor_node(MonitorInstance) ->
   get_state(CurrentStateNum, MonitorInstance).
 
 % Returns a list of outgoing nodes from the given node
-outgoing_transitions({_NodeType, Id, _Info}, OuterMonitorInstance, MonitorInstance) ->
+outgoing_transitions({_NodeType, Id, _Info}, MonitorInstance) ->
   Transitions = MonitorInstance#monitor_instance.transitions,
   % If a state has no outgoing transitions, it may not be in the transition table.
   % That's fine -- just return the empty list.
@@ -91,14 +91,12 @@ check_transition_list(TransitionList) ->
   end.
 
 % These utility functions are a tad on the messy side...
-transition_next_node(_Message, MonitorNode, PredicateResult, OuterMonitorInstance,
-                    MonitorInstance) ->
+transition_next_node(MonitorNode, PredicateResult, MonitorInstance) ->
   case PredicateResult of
     true ->
       % Check to ensure there's exactly one outward transition, otherwise
       % something's wrong.
-      check_transition_list(outgoing_transitions(MonitorNode, OuterMonitorInstance,
-                                                MonitorInstance));
+      check_transition_list(outgoing_transitions(MonitorNode, MonitorInstance));
     {false, Error} -> {error, Error}
   end.
 
@@ -115,19 +113,19 @@ filter_outgoing_transitions(InteractionType, NodeType, Message, MonitorNode, Pre
   lists:filtermap(fun(Node) ->
       NodeTy = element(1, Node),
       if (NodeTy == rec_node) or (NodeTy == choice_node) ->
-           NNRes = next_node(InteractionType, Message, Node,
-                             OuterMonitorInstance, MonitorInstance),
+           NNRes = monitor_step(InteractionType, Message, Node,
+                                OuterMonitorInstance, MonitorInstance),
            case NNRes of
-             {ok, NN} -> {true, NN};
+             {ok, NN, OMR} -> {true, {NN, OMR}};
              _Other -> false
            end;
          NodeTy == NodeType ->
            case PredicateFunction(Message, Node, MonitorInstance) of
              true ->
-               NNRes = next_node(InteractionType, Message, Node, OuterMonitorInstance,
-                                MonitorInstance),
+               NNRes = monitor_step(InteractionType, Message, Node, OuterMonitorInstance,
+                                    MonitorInstance),
                case NNRes of
-                 {ok, NN} -> {true, NN};
+                 {ok, NN, OMR} -> {true, {NN, OMR}};
                  _Other -> false
                end;
              {false, _Error} -> false
@@ -136,11 +134,59 @@ filter_outgoing_transitions(InteractionType, NodeType, Message, MonitorNode, Pre
         % Erlang is stupid
         true -> false
       end
-    end, outgoing_transitions(MonitorNode, OuterMonitorInstance, MonitorInstance)).
+    end, outgoing_transitions(MonitorNode, MonitorInstance)).
+
+% Check if all nested FSMs are ended. Returns true if yes, false if no.
+check_nested_fsms_ended(NestedFSMIDs, OuterMonitorInstance) ->
+  NestedFSMs = OuterMonitorInstance#outer_monitor_instance.monitor_instances,
+  %Monitors = lists:map(fun(ID) -> orddict:fetch(ID, NestedFSMs) end,
+  %                     NestedFSMIDs),
+  lists:all(fun(ID) ->
+                case orddict:find(ID, NestedFSMs) of
+                  {ok, MonitorInstance} -> is_monitor_ended(MonitorInstance);
+                  _ -> false
+                end end, NestedFSMIDs).
+
+new_monitor_instance(MonitorID, OuterMonitorInstance) ->
+  MonitorSpecs = OuterMonitorInstance#outer_monitor_instance.monitors,
+  MonitorSpec = orddict:fetch(MonitorID, MonitorSpecs),
+  instantiate_monitor(MonitorSpec#monitor_gen_state.states,
+                      MonitorSpec#monitor_gen_state.transitions).
+
+
+
+% Checks to see whether nested monitor instances have been instantiated for
+% the parallel node (by checking whether the first one is in the instances dict)
+% If not, instantiates them.
+instantiate_nested_monitor_instances(NestedFSMIDs, OuterMonitorInstance) ->
+  [TestID|_] = NestedFSMIDs,
+  MonitorInstances = OuterMonitorInstance#outer_monitor_instance.monitor_instances,
+  IsInstantiated = orddict:is_key(TestID, MonitorInstances),
+  % If we already have instances, that's great, just return the existing state
+  if IsInstantiated -> OuterMonitorInstance;
+     not IsInstantiated ->
+       % If not, then we need to add new instances
+       NewInstances = lists:foldr(fun(FSMID, RunningInstances) ->
+                       NewInstance = new_monitor_instance(FSMID, OuterMonitorInstance),
+                       orddict:store(FSMID, NewInstance, RunningInstances)
+                   end,
+                   MonitorInstances, NestedFSMIDs),
+       OuterMonitorInstance#outer_monitor_instance{monitor_instances=NewInstances}
+  end.
+
+
+delete_nested_monitor_instances(NestedFSMIDs, OuterMonitorInstance) ->
+  MonitorInstances =
+    OuterMonitorInstance#outer_monitor_instance.monitor_instances,
+  NewInstances = lists:foldr(fun(FSMID, RunningInstances) ->
+                               orddict:erase(FSMID, RunningInstances)
+                             end, MonitorInstances, NestedFSMIDs),
+  OuterMonitorInstance#outer_monitor_instance{monitor_instances=NewInstances}.
+
 
 % Gets the next node, given an interaction type, message, monitor node, and monitor instance.
-% This will either be {ok, Node} or {error , Error}
-next_node(InteractionType, Message, MonitorNode = {NodeTy, _Id, _Info}, OuterMonitorInstance,
+% This will either be {ok, Node, OuterInstance} or {error , Error}
+monitor_step(InteractionType, Message, MonitorNode = {NodeTy, _Id, _Info}, OuterMonitorInstance,
           MonitorInstance) when
     ((NodeTy == choice_node) or (NodeTy == rec_node)) ->
   % - In case of sends, filter send nodes; converse for receive nodes
@@ -168,8 +214,59 @@ next_node(InteractionType, Message, MonitorNode = {NodeTy, _Id, _Info}, OuterMon
                                                     OuterMonitorInstance,
                                                     MonitorInstance
                                                    ),
-  check_transition_list(FilteredTransitions);
-next_node(InteractionType, Message, MonitorNode, OuterMonitorInstance, MonitorInstance) ->
+
+  CheckTransitionListRes = check_transition_list(FilteredTransitions),
+  %case check_transition_list(FilteredTransitions) of
+  % error_logger:info_msg("CTL Res: ~p~n", [CheckTransitionListRes]),
+  case CheckTransitionListRes of
+    {ok, {NN, OMI}} -> {ok, NN, OMI};
+    Other -> Other
+  end;
+monitor_step(InteractionType, Message, MonitorNode = {NodeTy, _Id, NestedFSMIDs},
+             OuterMonitorInstance, MonitorInstance)
+    when (NodeTy == par_node) ->
+  % First, check if all nested FSMs have ended.
+  % If so, we can transition onto the next node.
+  % If not, then we need to check for the first matching par-block (well-formedness
+  % checks ensure there's at most one possible step), update that FSM, keep this one
+  % at the same place.
+  % This must work recursively -- so update OuterMonitorInstance at each step.
+  % FIXME: This code makes me want to shoot myself in the face
+  NestedFSMsEnded = check_nested_fsms_ended(NestedFSMIDs, OuterMonitorInstance),
+  if NestedFSMsEnded ->
+       % Get next node, call monitor_step
+       TNRRes = transition_next_node(MonitorNode, true, MonitorInstance),
+       case TNRRes of
+         {ok, NextNode} -> monitor_step(InteractionType, Message, NextNode, OuterMonitorInstance, MonitorInstance);
+         Other -> Other
+       end;
+     not NestedFSMsEnded ->
+       NewOuterInstance =
+         instantiate_nested_monitor_instances(NestedFSMIDs, OuterMonitorInstance),
+       CheckRes = check_nested_fsms(InteractionType, Message, NestedFSMIDs, NewOuterInstance),
+       case CheckRes of
+         {ok, NewOuterState} ->
+           % TODO: God this is ugly
+           NestedFSMsEnded1 = check_nested_fsms_ended(NestedFSMIDs, NewOuterState),
+           if NestedFSMsEnded1 ->
+                {ok, Node} = transition_next_node(MonitorNode, true, MonitorInstance),
+                {Ty, _, _} = Node,
+                error_logger:info_msg("After advancement, all FSMS at end node. Ty:~p~n", [Ty]),
+
+                if Ty == end_node ->
+                    {ok, Node, NewOuterState};
+                  Ty =/= end_node ->
+                    {ok, MonitorNode, NewOuterState}
+                end;
+              not NestedFSMsEnded ->
+                {ok, MonitorNode, NewOuterState}
+           end;
+
+           %{ok, MonitorNode, NewOuterState};
+         Other -> Other
+       end
+  end;
+monitor_step(InteractionType, Message, MonitorNode, OuterMonitorInstance, MonitorInstance) ->
   MonitorFn =
     case InteractionType of
       send -> fun monitor:can_send_at/3;
@@ -181,16 +278,40 @@ next_node(InteractionType, Message, MonitorNode, OuterMonitorInstance, MonitorIn
       _Other -> none
     end,
   if MonitorFn =/= none ->
-    transition_next_node(Message,
-                         MonitorNode,
-                         MonitorFn(Message, MonitorNode, MonitorInstance),
-                         OuterMonitorInstance,
-                         MonitorInstance
-                        );
+      TNRRes = transition_next_node(MonitorNode,
+                                    MonitorFn(Message, MonitorNode, MonitorInstance),
+                                    MonitorInstance),
+      case TNRRes of
+        {ok, NN} -> {ok, NN, OuterMonitorInstance};
+        Other -> Other
+      end;
     MonitorFn == none ->
        {error, bad_node}
   end.
 
+check_nested_fsms(InteractionType, Message, NestedFSMIDs, OuterMonitorInstance) ->
+  MonitorInstances = OuterMonitorInstance#outer_monitor_instance.monitor_instances,
+  NestedFSMInstances = lists:map(fun(ID) -> {ID, orddict:fetch(ID, MonitorInstances)} end,
+                                 NestedFSMIDs),
+  check_nested_fsms_inner(NestedFSMInstances, InteractionType, Message,
+                          OuterMonitorInstance).
+
+check_nested_fsms_inner([], _, _, _) ->
+  {error, no_nested_fsm_match};
+check_nested_fsms_inner([{NestedID, NestedMonitorInstance} | Instances], InteractionType, Message,
+                        OuterMonitorInstance) ->
+  CheckRes = check_message_in(InteractionType, Message, NestedID,
+                              NestedMonitorInstance, OuterMonitorInstance),
+  % Go with the first match. If there are no matches, reject the message.
+  case CheckRes of
+    {ok, NewOuterState} ->
+
+      % error_logger:info_msg("NewOuterState: ~p~n", [NewOuterState]),
+      {ok, NewOuterState};
+    _ ->
+      % If not, check the next one
+      check_nested_fsms_inner(Instances, InteractionType, Message, OuterMonitorInstance)
+  end.
 
 % Checks whether we can send or receive at this point
 % Checking a call response and a receive have identical logic.
@@ -269,40 +390,40 @@ can_send_response_at(Message, _MonitorNode, _OuterMonitorInstance) ->
   {false, bad_node_type}.
 
 
+% Checks message using a given monitor instance.
+% Returns {ok, NewOuterMonitorInstance} (with updated nested FSM table) if successful
+% {error, Err, OuterInstance} if not.
+check_message_in(InteractionType, Message, MonitorID, MonitorInstance, OuterMonitorInstance) ->
+  CurrentNode = current_monitor_node(MonitorInstance),
+  Res = monitor_step(InteractionType, Message, CurrentNode, OuterMonitorInstance,
+                     MonitorInstance),
+  case Res of
+    {ok, {_NodeType, Id, _Info}, NewOuterMonitorInstance} ->
+      NewMonitorInstance = MonitorInstance#monitor_instance{current_state=Id},
+      MonitorInstances = NewOuterMonitorInstance#outer_monitor_instance.monitor_instances,
+      NewMonitorInstances = orddict:store(MonitorID, NewMonitorInstance, MonitorInstances),
+      NewOuterMonitorInstance1 =
+        NewOuterMonitorInstance#outer_monitor_instance{monitor_instances=NewMonitorInstances},
+      {ok, NewOuterMonitorInstance1};
+    Other -> Other
+  end.
 
 % Checks a message given an interaction type, message, and monitor instance
 check_message(InteractionType, Message, OuterMonitorInstance) ->
   % Aight. Firstly, get the current node. The next thing to do is try and get the next node,
   % and if that works, then update the monitor state.
-
+  %  error_logger:info_msg("OMI: ~p~n", [OuterMonitorInstance]),
   RootFSM = orddict:fetch(0, OuterMonitorInstance#outer_monitor_instance.monitor_instances),
-  CurrentNode = current_monitor_node(RootFSM),
-  NextNodeResult = next_node(InteractionType, Message, CurrentNode, OuterMonitorInstance,
-                            RootFSM),
-  % TODO: Things will have to change here, I think
-  % next_node will need to return a couple of things. Essentially since we'll be
-  % dealing with nested FSMs, we will need to extend it to find the appropriate
-  % nested FSM, update that, etc.
-  % What we're doing atm is just updating the outermost one.
-  case NextNodeResult of
-    {ok, {_NodeType, Id, _Info}} ->
-      io:format("In ok section, new ID: ~p~n", [Id]),
+  check_message_in(InteractionType, Message, 0, RootFSM, OuterMonitorInstance).
 
-      NewMonitorInstance = RootFSM#monitor_instance{current_state=Id},
-      MonitorInstances = OuterMonitorInstance#outer_monitor_instance.monitor_instances,
-      NewMonitorInstances = orddict:store(0, NewMonitorInstance, MonitorInstances),
-      NewOuterMonitorInstance =
-      OuterMonitorInstance#outer_monitor_instance{monitor_instances=NewMonitorInstances},
-      {ok, NewOuterMonitorInstance};
-    {error, Error} ->
-      io:format("In error section~n"),
-      {error, Error, OuterMonitorInstance}
-  end.
+get_root_fsm(OuterMonitorInstance) ->
+  orddict:fetch(0, OuterMonitorInstance#outer_monitor_instance.monitor_instances).
 
-% TODO: this should be per-monitor
 is_ended(OuterMonitorInstance) ->
-  RootFSM = orddict:fetch(0, OuterMonitorInstance#outer_monitor_instance.monitor_instances),
-  CurrentMonitorNode = current_monitor_node(RootFSM),
+  is_monitor_ended(get_root_fsm(OuterMonitorInstance)).
+
+is_monitor_ended(MonitorInstance) ->
+  CurrentMonitorNode = current_monitor_node(MonitorInstance),
   case CurrentMonitorNode of
     {end_node, _, _} -> true;
     _Other -> false

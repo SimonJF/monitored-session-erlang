@@ -26,7 +26,7 @@ simple_send_recv_role1_bad_test() ->
   {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
   ?assertNot(monitor:is_ended(MonitorInstance)),
   RequestMessage = message:message(0, "Role1", ["Role2"], "Request", [], []),
-  {error, _Error, _MonitorInstance1} = monitor:recv(RequestMessage, MonitorInstance).
+  {error, _Error} = monitor:recv(RequestMessage, MonitorInstance).
 
 simple_send_recv_role2_test() ->
   Filename = ?SPEC_DIRECTORY ++ "RequestResponse_Role2.scr",
@@ -143,5 +143,67 @@ rec2_test2_test() ->
   % and request again to test scope escape
   {ok, MonitorInstance3} = monitor:send(StartMessage, MonitorInstance2),
   ?assertNot(monitor:is_ended(MonitorInstance3)).
+
+par1_test1_test() ->
+  Filename = ?SPEC_DIRECTORY ++ "ParTest1_A.scr",
+  ProtocolName = "ParTest1",
+  RoleName = "A",
+  {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
+  ?assertNot(monitor:is_ended(MonitorInstance)),
+  StartMessage = message:message(0, "A", ["B"], "Msg1", [], []),
+  {ok, MonitorInstance1} = monitor:send(StartMessage, MonitorInstance),
+
+
+  %error_logger:info_msg("Monitors before: ~p~n", [MonitorInstance1]),
+  ParMsg1 = message:message(0, "B", ["A"], "Msg2", [], []),
+  {ok, MonitorInstance2} = monitor:recv(ParMsg1, MonitorInstance1),
+  % error_logger:info_msg("Monitors after: ~p~n", [MonitorInstance2]),
+
+  ParMsg2 = message:message(0, "B", ["A"], "Msg3", [], []),
+  {ok, MonitorInstance3} = monitor:recv(ParMsg2, MonitorInstance2),
+  ParMsg3 = message:message(0, "A", ["B"], "Msg4", [], []),
+  {ok, MonitorInstance4} = monitor:send(ParMsg3, MonitorInstance3),
+  ParMsg4 = message:message(0, "A", ["B"], "Msg5", [], []),
+  {ok, MonitorInstance5} = monitor:send(ParMsg4, MonitorInstance4),
+  ParMsg5 = message:message(0, "A", ["B"], "Msg6", [], []),
+  {ok, MonitorInstance6} = monitor:send(ParMsg5, MonitorInstance5),
+  ?assert(monitor:is_ended(MonitorInstance6)).
+
+par1_test2_test() ->
+  Filename = ?SPEC_DIRECTORY ++ "ParTest1_A.scr",
+  ProtocolName = "ParTest1",
+  RoleName = "A",
+  {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
+  ?assertNot(monitor:is_ended(MonitorInstance)),
+  StartMessage = message:message(0, "A", ["B"], "Msg1", [], []),
+  {ok, MonitorInstance1} = monitor:send(StartMessage, MonitorInstance),
+  ParMsg1 = message:message(0, "B", ["A"], "Msg2", [], []),
+  {ok, MonitorInstance2} = monitor:recv(ParMsg1, MonitorInstance1),
+  ParMsg2 = message:message(0, "A", ["B"], "Msg4", [], []),
+  {ok, MonitorInstance3} = monitor:send(ParMsg2, MonitorInstance2),
+  ParMsg3 = message:message(0, "B", ["A"], "Msg3", [], []),
+  {ok, MonitorInstance4} = monitor:recv(ParMsg3, MonitorInstance3),
+  ParMsg4 = message:message(0, "A", ["B"], "Msg5", [], []),
+  {ok, MonitorInstance5} = monitor:send(ParMsg4, MonitorInstance4),
+  ParMsg5 = message:message(0, "A", ["B"], "Msg6", [], []),
+  {ok, MonitorInstance6} = monitor:send(ParMsg5, MonitorInstance5),
+  % error_logger:info_msg("MonitorInstance6: ~p~n", [MonitorInstance6]),
+  ?assert(monitor:is_ended(MonitorInstance6)).
+
+par1_badtest1_test() ->
+  Filename = ?SPEC_DIRECTORY ++ "ParTest1_A.scr",
+  ProtocolName = "ParTest1",
+  RoleName = "A",
+  {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
+  ?assertNot(monitor:is_ended(MonitorInstance)),
+  StartMessage = message:message(0, "A", ["B"], "Msg1", [], []),
+  {ok, MonitorInstance1} = monitor:send(StartMessage, MonitorInstance),
+  ParMsg1 = message:message(0, "B", ["A"], "Msg2", [], []),
+  {ok, MonitorInstance2} = monitor:recv(ParMsg1, MonitorInstance1),
+  ParMsg2 = message:message(0, "A", ["B"], "Msg4", [], []),
+  {ok, MonitorInstance3} = monitor:send(ParMsg2, MonitorInstance2),
+  BadMsg = message:message(0, "B", ["A"], "PINES", [], []),
+  {error, _Error} = monitor:recv(BadMsg, MonitorInstance3).
+
 
 

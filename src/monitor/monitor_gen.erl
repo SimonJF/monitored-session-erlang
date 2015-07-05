@@ -55,7 +55,7 @@ rec_node(Id, {rec, MuName, _}) ->
   make_node(rec_node, Id, {MuName}).
 
 par_node(Id, {par, _ParallelBlocks, NestedFSMIDs}) ->
-  make_node(par_node, Id, {NestedFSMIDs}).
+  make_node(par_node, Id, NestedFSMIDs).
 
 
 
@@ -141,11 +141,12 @@ test_fsm(Filename) ->
                   io:format("AST: ~p~n", [AST]),
                   lists:foreach(fun (Mon) ->
                                 case Mon of
-                                  {ok, ProtocolName, {ok, {_RID, States, Transitions}}} ->
+                                  {ok, ProtocolName, {ok, OuterState}} ->
                                     io:format("Monitor for local protocol ~s:~n", [ProtocolName]),
-                                    print_fsm(States, Transitions),
-                                    graphviz_out(States, Transitions),
-                                    print_reachability(States, Transitions);
+                                    print_fsms(OuterState);
+                                    % print_fsm(States, Transitions),
+                                    %graphviz_out(States, Transitions),
+                                    %print_reachability(States, Transitions);
                                   {ok, ProtocolName, Error} ->
                                     io:format("Error generating monitor for local protocol ~s:~n~p~n",
                                               [ProtocolName, Error]);
@@ -157,6 +158,7 @@ test_fsm(Filename) ->
                                 end, LocalMonitors)
 
   end.
+
 
 generate_module_monitors({module, _Name, _Imports, _Payloads, Protocols}) ->
   lists:map(fun (Protocol) ->
@@ -246,7 +248,7 @@ add_end_node(InnerState) ->
 % Increments the ID in the OuterState
 evaluate_nested_fsm(Scope, FSMID, OuterState) ->
   % Create an outer monitor gen state.
-  InnerState = fresh_inner_state(), % Root FSm
+  InnerState = fresh_inner_state(),
   OuterState1 = update_nested_fsm(FSMID, InnerState, OuterState),
   OuterState2 = increment_running_fsm_id(OuterState1),
 
@@ -375,17 +377,17 @@ evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, InnerState, OuterState, MuMa
           {InnerState2, OuterState1} = evaluate_scope(RecScope, InnerState1, OuterState),
           evaluate_scope_inner(XS, EndIndex, InnerState2, OuterState1, MuMap);
         {par, ParallelBlocks} ->
-          NestedFSMs = OuterState#outer_monitor_gen_state.nested_fsms,
-          RunningNestedFSMID = OuterState#outer_monitor_gen_state.running_nested_fsm_id,
+          %NestedFSMs = OuterState#outer_monitor_gen_state.nested_fsms,
+          %RunningNestedFSMID = OuterState#outer_monitor_gen_state.running_nested_fsm_id,
 
           {OuterState1, NestedFSMIDs, MuMap1} =
-            evaluate_parallel_blocks(ParallelBlocks, RunningNestedFSMID, NestedFSMs),
+            evaluate_parallel_blocks(ParallelBlocks, OuterState, MuMap),
           {RID, NewStates, Ts} = generate_node({par, ParallelBlocks, NestedFSMIDs},
                                                RunningID, States, Transitions),
           NextIndex = calculate_next_index(ScopeBlock, RunningID, EndIndex, MuMap1),
           NewTransitions = add_transition(RunningID, NextIndex, Ts),
-          InnerState1 = update_inner_state(NextIndex, NewStates, NewTransitions),
-          evaluate_scope_inner(XS, EndIndex, InnerState1, OuterState, MuMap1);
+          InnerState1 = update_inner_state(RID, NewStates, NewTransitions),
+          evaluate_scope_inner(XS, EndIndex, InnerState1, OuterState1, MuMap1);
         Other -> {error, monitor_gen, unsupported_node, Other}
       end;
      % Continue is taken care of in calculate_next_index
@@ -403,8 +405,9 @@ evaluate_parallel_blocks_inner([Block|ParallelBlocks], OuterState, BlockIDs, MuM
   Size = block_size(Block),
   FSMID = OuterState#outer_monitor_gen_state.running_nested_fsm_id,
   ParScope = scope("Par" ++ integer_to_list(FSMID), Block, Size, MuMap),
-  MonitorGenState = fresh_outer_state(),
-  EvalRes = evaluate_nested_fsm(ParScope, FSMID, MonitorGenState),
+  %MonitorGenState = OuterState#outer_monitor_gen_state{running_nested_fsm_id=FSMID + 1},
+
+  EvalRes = evaluate_nested_fsm(ParScope, FSMID, OuterState),
   case EvalRes of
     {ok, NewOuterState} ->
       evaluate_parallel_blocks_inner(ParallelBlocks, NewOuterState, [FSMID|BlockIDs], MuMap);
@@ -452,6 +455,15 @@ generate_node(Par = {par, _, _}, RunningID, States, Transitions) ->
   add_node(RunningID, ParNode, States, Transitions).
 
 % Debug all the things
+
+print_fsms(NestedFSMs) ->
+  NestedFSMList = orddict:to_list(NestedFSMs),
+  lists:foreach(fun({ID, FSM}) ->
+                    io:format("FSM ID: ~p~n", [ID]),
+                    States = FSM#monitor_gen_state.states,
+                    Transitions = FSM#monitor_gen_state.transitions,
+                    print_fsm(States, Transitions) end, NestedFSMList).
+
 % hax to the max
 print_fsm(States, Transitions) ->
   io:format("States: ~n", []),
