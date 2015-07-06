@@ -165,6 +165,8 @@ par1_test1_test() ->
   {ok, MonitorInstance4} = monitor:send(ParMsg3, MonitorInstance3),
   ParMsg4 = message:message(0, "A", ["B"], "Msg5", [], []),
   {ok, MonitorInstance5} = monitor:send(ParMsg4, MonitorInstance4),
+  error_logger:info_msg("Test1 monitor 5: ~p~n", [MonitorInstance5]),
+
   ParMsg5 = message:message(0, "A", ["B"], "Msg6", [], []),
   {ok, MonitorInstance6} = monitor:send(ParMsg5, MonitorInstance5),
   ?assert(monitor:is_ended(MonitorInstance6)).
@@ -205,5 +207,34 @@ par1_badtest1_test() ->
   BadMsg = message:message(0, "B", ["A"], "PINES", [], []),
   {error, _Error} = monitor:recv(BadMsg, MonitorInstance3).
 
+par2_test1_test() ->
+  Filename = ?SPEC_DIRECTORY ++ "ParTest2_A.scr",
+  ProtocolName = "ParTest2",
+  RoleName = "A",
+  {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
+  ?assertNot(monitor:is_ended(MonitorInstance)),
+  StartMessage = message:message(0, "A", ["B"], "Msg1", [], []),
+  % Iteration 1
+  {ok, MonitorInstance1} = monitor:send(StartMessage, MonitorInstance),
+  ParMsg1 = message:message(0, "B", ["A"], "Msg2", [], []),
+  {ok, MonitorInstance2} = monitor:recv(ParMsg1, MonitorInstance1),
+  ParMsg2 = message:message(0, "A", ["B"], "Msg4", [], []),
+  {ok, MonitorInstance3} = monitor:send(ParMsg2, MonitorInstance2),
+  ParMsg3 = message:message(0, "B", ["A"], "Msg3", [], []),
+  {ok, MonitorInstance4} = monitor:recv(ParMsg3, MonitorInstance3),
+  ParMsg4 = message:message(0, "A", ["B"], "Msg5", [], []),
+  {ok, MonitorInstance5} = monitor:send(ParMsg4, MonitorInstance4),
+  error_logger:info_msg("Monitor 5, Partest2: ~p~n", [MonitorInstance5]),
+  % Iteration 2
+  ParMsg5 = message:message(0, "A", ["B"], "Msg1", [], []),
+  {ok, MonitorInstance6} = monitor:send(ParMsg5, MonitorInstance5),
+  ParMsg6 = message:message(0, "B", ["A"], "Msg2", [], []),
+  {ok, MonitorInstance7} = monitor:recv(ParMsg6, MonitorInstance6),
+  ParMsg7 = message:message(0, "A", ["B"], "Msg4", [], []),
+  {ok, MonitorInstance8} = monitor:send(ParMsg7, MonitorInstance7),
+  ParMsg8 = message:message(0, "B", ["A"], "Msg3", [], []),
+  {ok, MonitorInstance9} = monitor:recv(ParMsg8, MonitorInstance8),
+  ParMsg9 = message:message(0, "A", ["B"], "Msg5", [], []),
+  {ok, _MonitorInstance10} = monitor:send(ParMsg9, MonitorInstance9).
 
 

@@ -175,14 +175,34 @@ instantiate_nested_monitor_instances(NestedFSMIDs, OuterMonitorInstance) ->
   end.
 
 
-delete_nested_monitor_instances(NestedFSMIDs, OuterMonitorInstance) ->
+reset_nested_monitor_instances(NestedFSMIDs, OuterMonitorInstance) ->
   MonitorInstances =
     OuterMonitorInstance#outer_monitor_instance.monitor_instances,
   NewInstances = lists:foldr(fun(FSMID, RunningInstances) ->
-                               orddict:erase(FSMID, RunningInstances)
+                                 case orddict:find(FSMID, RunningInstances) of
+                                   {ok, Instance} ->
+                                     NewInstance = Instance#monitor_instance{current_state=0},
+                                     orddict:store(FSMID, NewInstance, RunningInstances);
+                                   _ -> RunningInstances
+                                 end
                              end, MonitorInstances, NestedFSMIDs),
   OuterMonitorInstance#outer_monitor_instance{monitor_instances=NewInstances}.
 
+check_par_ended(MonitorNode, MonitorInstance, NestedFSMIDs, OuterState) ->
+  NestedFSMsEnded = check_nested_fsms_ended(NestedFSMIDs, OuterState),
+  if NestedFSMsEnded ->
+    {ok, Node} = transition_next_node(MonitorNode, true, MonitorInstance),
+    {Ty, _, _} = Node,
+    error_logger:info_msg("After advancement, all FSMS at end node. Ty:~p~n", [Ty]),
+    OuterState1 = reset_nested_monitor_instances(NestedFSMIDs, OuterState),
+    %if Ty == end_node ->
+        {Node, OuterState1};
+    %   Ty =/= end_node ->
+%        {MonitorNode, OuterState1}
+      %end;
+    not NestedFSMsEnded ->
+      {MonitorNode, OuterState}
+  end.
 
 % Gets the next node, given an interaction type, message, monitor node, and monitor instance.
 % This will either be {ok, Node, OuterInstance} or {error , Error}
@@ -245,24 +265,10 @@ monitor_step(InteractionType, Message, MonitorNode = {NodeTy, _Id, NestedFSMIDs}
          instantiate_nested_monitor_instances(NestedFSMIDs, OuterMonitorInstance),
        CheckRes = check_nested_fsms(InteractionType, Message, NestedFSMIDs, NewOuterInstance),
        case CheckRes of
-         {ok, NewOuterState} ->
-           % TODO: God this is ugly
-           NestedFSMsEnded1 = check_nested_fsms_ended(NestedFSMIDs, NewOuterState),
-           if NestedFSMsEnded1 ->
-                {ok, Node} = transition_next_node(MonitorNode, true, MonitorInstance),
-                {Ty, _, _} = Node,
-                error_logger:info_msg("After advancement, all FSMS at end node. Ty:~p~n", [Ty]),
-
-                if Ty == end_node ->
-                    {ok, Node, NewOuterState};
-                  Ty =/= end_node ->
-                    {ok, MonitorNode, NewOuterState}
-                end;
-              not NestedFSMsEnded ->
-                {ok, MonitorNode, NewOuterState}
-           end;
-
-           %{ok, MonitorNode, NewOuterState};
+         {ok, NewOuterInstance1} ->
+           {NextNode, NewOuterInstance2} = check_par_ended(MonitorNode, MonitorInstance,
+                                                           NestedFSMIDs, NewOuterInstance1),
+           {ok, NextNode, NewOuterInstance2};
          Other -> Other
        end
   end;

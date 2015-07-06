@@ -361,7 +361,7 @@ evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, InnerState, OuterState, MuMa
                       {RID1, States1, Transitions1, OuterState}, ChoiceBlocks),
           InnerState1 = update_inner_state(RID2, States2, Transitions2),
           evaluate_scope_inner(XS, EndIndex, InnerState1, OuterState1, MuMap);
-          % TODO: Parallel, Interruptible
+          % TODO: Interruptible
         {rec, MuName, Interactions} ->
           ScopeEndIndex = RunningID + instruction_size(X),
           RecNodeID = RunningID,
@@ -379,15 +379,14 @@ evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, InnerState, OuterState, MuMa
         {par, ParallelBlocks} ->
           %NestedFSMs = OuterState#outer_monitor_gen_state.nested_fsms,
           %RunningNestedFSMID = OuterState#outer_monitor_gen_state.running_nested_fsm_id,
-
-          {OuterState1, NestedFSMIDs, MuMap1} =
+          {OuterState1, NestedFSMIDs} =
             evaluate_parallel_blocks(ParallelBlocks, OuterState, MuMap),
           {RID, NewStates, Ts} = generate_node({par, ParallelBlocks, NestedFSMIDs},
                                                RunningID, States, Transitions),
-          NextIndex = calculate_next_index(ScopeBlock, RunningID, EndIndex, MuMap1),
+          NextIndex = calculate_next_index(ScopeBlock, RunningID, EndIndex, MuMap),
           NewTransitions = add_transition(RunningID, NextIndex, Ts),
           InnerState1 = update_inner_state(RID, NewStates, NewTransitions),
-          evaluate_scope_inner(XS, EndIndex, InnerState1, OuterState1, MuMap1);
+          evaluate_scope_inner(XS, EndIndex, InnerState1, OuterState1, MuMap);
         Other -> {error, monitor_gen, unsupported_node, Other}
       end;
      % Continue is taken care of in calculate_next_index
@@ -397,10 +396,10 @@ evaluate_scope_inner(ScopeBlock = [X|XS], EndIndex, InnerState, OuterState, MuMa
 
 
 evaluate_parallel_blocks(Blocks, OuterState, MuMap) ->
-  evaluate_parallel_blocks_inner(Blocks, OuterState, MuMap, []).
+  evaluate_parallel_blocks_inner(Blocks, OuterState, [], MuMap).
 
-evaluate_parallel_blocks_inner([], OuterState, BlockIDs, MuMap) ->
-  {OuterState, BlockIDs, MuMap};
+evaluate_parallel_blocks_inner([], OuterState, BlockIDs, _MuMap) ->
+  {OuterState, BlockIDs};
 evaluate_parallel_blocks_inner([Block|ParallelBlocks], OuterState, BlockIDs, MuMap) ->
   Size = block_size(Block),
   FSMID = OuterState#outer_monitor_gen_state.running_nested_fsm_id,
