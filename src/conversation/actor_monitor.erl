@@ -372,7 +372,7 @@ handle_outgoing_message(ProtocolName, RoleName, ConversationID, Recipients,
   end.
 
 handle_send_failed(ConvID, RoleName, State) ->
-  error_logger:error_message("Could not reach ~p, terminating conversation~n", [RoleName]),
+  error_logger:error_msg("Could not reach ~p, terminating conversation~n", [RoleName]),
   conversation_instance:end_conversation(ConvID, {role_offline, RoleName}).
 
 monitor_msg(CommType, MessageData, _ProtocolName, RoleName, ConversationID, State) ->
@@ -393,7 +393,7 @@ monitor_with(CommType, MessageData, Monitor, State) ->
   case MonitorResult of
     {ok, NewMonitorInstance} ->
       {ok, NewMonitorInstance};
-    {error, Err, _Monitor} ->
+    {error, Err} ->
       monitor_warn("Monitor failed when processing message ~p (~p). Error: ~p~n",
                    [MessageData, CommType, Err], State),
       {error, Err}

@@ -129,9 +129,6 @@ initial_filled_val({RoleName, {local_protocol, _, _, _, Roles, _}}) ->
                      true -> Acc
                   end end, not_filled, Roles).
 
-%-record(subsession_state, {initiator_pid,
-%                           initiator_role,
-%                           parent_conv_id}).
 
 fresh_state(ProtocolName, RoleSpecs) ->
 % Add the names to the map, so we can ensure we accept only roles which are
@@ -149,8 +146,8 @@ fresh_state(ProtocolName, RoleSpecs, FailureHandlingFn) ->
   State = fresh_state(ProtocolName, RoleSpecs),
   State#conv_inst_state{failure_handler_function=FailureHandlingFn}.
 
-fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole) ->
-  State = fresh_state(ProtocolName, RoleSpecs),
+fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole, FailureHandlingFn) ->
+  State = fresh_state(ProtocolName, RoleSpecs, FailureHandlingFn),
   SubsessionState = #subsession_state{initiator_pid=InitiatorPID, initiator_role=InitiatorRole,
                                       parent_conv_id=ParentConvID},
   State#conv_inst_state{subsession_state=SubsessionState}.
@@ -265,7 +262,12 @@ handle_send_subsession_invitations(InternalRoles, ExternalInvitations, State) ->
   if length(FailList) == 0 ->
        ok;
      true ->
-       actor_monitor:subsession_establish_error(InitiatorPID, ParentConvID, InitiatorRole, self()),
+       if InitiatorPID =/= undefined ->
+            actor_monitor:subsession_establish_error(InitiatorPID, ParentConvID, InitiatorRole, self());
+          InitiatorPID == undefined ->
+            % TODO: Notify failure handler function of session failure.
+            ok
+       end,
        end_conversation(self(), invitation_failed)
   end.
 
@@ -287,11 +289,14 @@ handle_unset_property(Key, State) ->
 init([ProtocolName, RoleSpecs]) ->
   process_flag(trap_exit, true),
   {ok, fresh_state(ProtocolName, RoleSpecs, undefined)};
-%init([ProtocolName, RoleSpecs, FailureHandlerFn]) ->
-%  {ok, fresh_state(ProtocolName, RoleSpecs, 
+init([ProtocolName, RoleSpecs, FailureHandlerFn]) ->
+  {ok, fresh_state(ProtocolName, RoleSpecs, FailureHandlerFn)};
 init([ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole]) ->
   process_flag(trap_exit, true),
-  {ok, fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole)}.
+  {ok, fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole, undefined)};
+init([ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole, FailureHandlerFn]) ->
+  process_flag(trap_exit, true),
+  {ok, fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole, FailureHandlerFn)}.
 
 handle_call({get_endpoints, RoleList}, _, State) ->
   Res = handle_get_endpoints(RoleList, State),

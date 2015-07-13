@@ -165,7 +165,7 @@ par1_test1_test() ->
   {ok, MonitorInstance4} = monitor:send(ParMsg3, MonitorInstance3),
   ParMsg4 = message:message(0, "A", ["B"], "Msg5", [], []),
   {ok, MonitorInstance5} = monitor:send(ParMsg4, MonitorInstance4),
-  error_logger:info_msg("Test1 monitor 5: ~p~n", [MonitorInstance5]),
+  %error_logger:info_msg("Test1 monitor 5: ~p~n", [MonitorInstance5]),
 
   ParMsg5 = message:message(0, "A", ["B"], "Msg6", [], []),
   {ok, MonitorInstance6} = monitor:send(ParMsg5, MonitorInstance5),
@@ -224,7 +224,7 @@ par2_test1_test() ->
   {ok, MonitorInstance4} = monitor:recv(ParMsg3, MonitorInstance3),
   ParMsg4 = message:message(0, "A", ["B"], "Msg5", [], []),
   {ok, MonitorInstance5} = monitor:send(ParMsg4, MonitorInstance4),
-  error_logger:info_msg("Monitor 5, Partest2: ~p~n", [MonitorInstance5]),
+%  error_logger:info_msg("Monitor 5, Partest2: ~p~n", [MonitorInstance5]),
   % Iteration 2
   ParMsg5 = message:message(0, "A", ["B"], "Msg1", [], []),
   {ok, MonitorInstance6} = monitor:send(ParMsg5, MonitorInstance5),
