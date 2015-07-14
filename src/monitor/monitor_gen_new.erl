@@ -129,12 +129,12 @@ evaluate_nested_fsm(Block, FSMID, MonitorState) ->
   MonitorState2 = increment_running_fsm_id(MonitorState1),
 % evaluate_block([X|XS], PrevIndex, EndIndex, FSMState, MonitorState) ->
 
-  ScopeEndIndex = block_size(Block),
+  ScopeEndIndex = block_size(Block) + 2,
   EvalRes = evaluate_block(Block, 0, ScopeEndIndex, FSMState1, MonitorState2),
   case EvalRes of
     {FSMState2, MonitorState3} ->
-      % FSMState3 = add_state(end_state(), FSMState2),
-      {ok, update_nested_fsm(FSMID, FSMState2, MonitorState3)};
+      FSMState3 = add_state(end_state(), FSMState2),
+      {ok, update_nested_fsm(FSMID, FSMState3, MonitorState3)};
     Other -> Other % Various monitor errors
   end.
 
@@ -194,7 +194,7 @@ instruction_size({local_call_response_recv, _, _}) -> 1;
 instruction_size({choice, _, Choices}) ->
   % Final transition in the choice block goes to the end index
   BasicSize = lists:foldl(fun(ChoiceBlock, Sum) -> Sum + (block_size(ChoiceBlock) - 1) end, 0, Choices),
-  1 + BasicSize;
+  BasicSize;
 instruction_size({rec, _, Block}) -> 1 + block_size(Block);
 instruction_size({par, _ParallelBlocks}) -> 1; % Nested FSMs have their own internal numbering system
 instruction_size({local_interruptible, _, InterruptibleBlock, _}) -> % Not supported.
@@ -292,7 +292,7 @@ evaluate_block([X], PrevIndex, EndIndex, FSMState, MonitorState) ->
        FSMState1 = add_comm_transition(X, PrevIndex, EndIndex, FSMState),
        {FSMState1, MonitorState};
      not IsCommAction ->
-       evaluate_scope(X, PrevIndex, FSMState, MonitorState)
+       evaluate_scope(X, PrevIndex, EndIndex, FSMState, MonitorState)
   end;
 evaluate_block([X|XS], PrevIndex, EndIndex, FSMState, MonitorState) ->
   IsCommAction = is_comm_action(X),
@@ -302,10 +302,13 @@ evaluate_block([X|XS], PrevIndex, EndIndex, FSMState, MonitorState) ->
        FSMState1 = evaluate_comm_transition(X, PrevIndex, FSMState),
        evaluate_block(XS, RunningID, EndIndex, FSMState1, MonitorState);
      not IsCommAction ->
+       ScopeEndIndex = RunningID + instruction_size(X) + 1,
        {FSMState1, MonitorState1} =
-         evaluate_scope(X, PrevIndex, FSMState, MonitorState),
-       evaluate_block(XS, get_running_id(FSMState1), EndIndex,
-                      FSMState1, MonitorState1)
+         evaluate_scope(X, PrevIndex, ScopeEndIndex, FSMState, MonitorState),
+       FSMState2 = add_state(standard_state(), FSMState1),
+       % PrevIndex here: end index of the scope.
+       evaluate_block(XS, ScopeEndIndex, EndIndex,
+                      FSMState2, MonitorState1)
   end.
 
 
@@ -319,21 +322,42 @@ evaluate_blocks([Block|Blocks], PrevIndex, EndIndex, FSMState, MonitorState) ->
 
 % Takes top-level scope AST, FSM state and monitor state.
 % Returns ID of top node, new FSM state, new monitor state.
-evaluate_scope({local_protocol, _, _, _, _, Block}, _PrevIndex, FSMState,
+evaluate_scope({local_protocol, _, _, _, _, Block}, _PrevIndex, _EndIndex, FSMState,
                MonitorState) ->
   ScopeEndIndex = instruction_size(Block),
   {FSMState1, MonitorState1} = evaluate_block(Block, 0, ScopeEndIndex, FSMState, MonitorState),
   FSMState2 = add_state(standard_state(), FSMState1),
   {FSMState2, MonitorState1};
-evaluate_scope(Choice = {choice, _, ChoiceBlocks}, PrevIndex,
+evaluate_scope({choice, _, ChoiceBlocks}, PrevIndex, EndIndex,
                FSMState, MonitorState) ->
-  RunningID = get_running_id(FSMState),
-  io:format("RunningID: ~p~nChoice instruction size: ~p~n", [RunningID, instruction_size(Choice)]),
-  ScopeEndIndex = RunningID + instruction_size(Choice),
-  {FSMState1, MonitorState1} = evaluate_blocks(ChoiceBlocks, PrevIndex,
-                                               ScopeEndIndex, FSMState, MonitorState),
+  % We have a choice block.
+  % We need to evaluate each block in turn.
+  % Each block needs to converge on the end index.
+  evaluate_blocks(ChoiceBlocks, PrevIndex, EndIndex, FSMState, MonitorState).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  % Running ID: Last state + 1
+  %RunningID = get_running_id(FSMState),
+  %io:format("RunningID: ~p~nChoice instruction size: ~p~n", [RunningID, instruction_size(Choice)]),
+  %ScopeEndIndex = RunningID + instruction_size(Choice),
+  %{FSMState1, MonitorState1} = evaluate_blocks(ChoiceBlocks, PrevIndex,
+       %                                        ScopeEndIndex, FSMState, MonitorState),
   % Now, we need a state at ScopeEndIndex (which *should* be RunningID)
   % This is one place bugs could creep in...
-  FSMState2 = add_state(standard_state(), FSMState1),
-  {FSMState2, MonitorState1}.
+  %io:format("RunningID = ~p, ScopeEndIndex = ~p~n", [get_running_id(FSMState1), ScopeEndIndex]),
+  %FSMState2 = add_state(standard_state(), FSMState1),
+  %{FSMState2, MonitorState1}.
 
