@@ -154,25 +154,22 @@ generate_monitor({local_protocol, _, _, _, _, Block}) ->
 
 %%%% Communication Actions
 send_transition(ToID, Recipients, MessageName, PayloadTypes) ->
-  {send_transition, ToID, Recipients, MessageName, PayloadTypes}.
+  {send, ToID, Recipients, MessageName, PayloadTypes}.
 
 receive_transition(ToID, Sender, MessageName, PayloadTypes) ->
-  {receive_transition, ToID, Sender, MessageName, PayloadTypes}.
+  {recv, ToID, Sender, MessageName, PayloadTypes}.
 
 send_call_request_transition(ToID, Recipient, MessageName, PayloadTypes) ->
-  {send_call_request_transition, ToID, Recipient, MessageName, PayloadTypes}.
+  {send_call_request, ToID, Recipient, MessageName, PayloadTypes}.
 
 receive_call_request_transition(ToID, Sender, MessageName, PayloadTypes) ->
-  {receive_call_request_transition, ToID, Sender, MessageName, PayloadTypes}.
+  {recv_call_request, ToID, Sender, MessageName, PayloadTypes}.
 
 send_call_response_transition(ToID, Recipient, MessageName, PayloadTypes) ->
-  {send_call_response_transition, ToID, Recipient, MessageName, PayloadTypes}.
+  {send_call_response, ToID, Recipient, MessageName, PayloadTypes}.
 
 receive_call_response_transition(ToID, Sender, MessageName, PayloadTypes) ->
-  {receive_call_response_transition, ToID, Sender, MessageName, PayloadTypes}.
-
-join_transition(ToID) ->
-  {join_transition, ToID}.
+  {recv_call_response, ToID, Sender, MessageName, PayloadTypes}.
 
 %%% State creation functions: Standard state, and a state "containing" nested FSMs
 standard_state() -> standard_state.
@@ -186,7 +183,6 @@ end_state() -> end_state.
 block_size([]) -> 0;
 block_size([X]) ->
   instruction_size(X);
-% FIXME: Hack
 block_size([{par, _}|XS]) -> block_size(XS);
 block_size([_|[{continue, _}|_]]) -> 0;
 block_size([X|XS]) ->

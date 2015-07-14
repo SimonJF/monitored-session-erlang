@@ -13,7 +13,8 @@
                                  monitor_instances
                                 }).
 
--record(monitor_instance, {current_state = 0,
+-record(monitor_instance, {fsm_id,
+                           current_state = 0,
                            states,
                            transitions,
                            reachability_dict
