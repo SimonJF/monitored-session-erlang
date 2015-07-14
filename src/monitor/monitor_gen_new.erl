@@ -129,7 +129,7 @@ evaluate_nested_fsm(Block, FSMID, MonitorState) ->
   MonitorState2 = increment_running_fsm_id(MonitorState1),
 % evaluate_block([X|XS], PrevIndex, EndIndex, FSMState, MonitorState) ->
 
-  ScopeEndIndex = block_size(Block) + 2,
+  ScopeEndIndex = block_size(Block) + 1,
   EvalRes = evaluate_block(Block, 0, ScopeEndIndex, FSMState1, MonitorState2),
   case EvalRes of
     {FSMState2, MonitorState3} ->
@@ -183,29 +183,37 @@ end_state() -> end_state.
 %%%%%%%%
 
 block_size([]) -> 0;
-block_size([X|XS]) -> instruction_size(X) + block_size(XS).
+block_size([X]) ->
+  instruction_size(X);
+block_size([X|XS]) ->
+  instruction_size(X) + 1 + block_size(XS).
 
-instruction_size({local_send, _, _}) -> 1;
-instruction_size({local_receive, _, _}) -> 1;
-instruction_size({local_call_request_send, _, _}) -> 1;
-instruction_size({local_call_request_recv, _, _}) -> 1;
-instruction_size({local_call_response_send, _, _}) -> 1;
-instruction_size({local_call_response_recv, _, _}) -> 1;
 instruction_size({choice, _, Choices}) ->
-  % Final transition in the choice block goes to the end index
-  BasicSize = lists:foldl(fun(ChoiceBlock, Sum) -> Sum + (block_size(ChoiceBlock) - 1) end, 0, Choices),
-  BasicSize;
-instruction_size({rec, _, Block}) -> 1 + block_size(Block);
-instruction_size({par, _ParallelBlocks}) -> 1; % Nested FSMs have their own internal numbering system
-instruction_size({local_interruptible, _, InterruptibleBlock, _}) -> % Not supported.
-  block_size(InterruptibleBlock);
-instruction_size({local_interruptible_throw, _, InterruptibleBlock, _, _}) ->
-  block_size(InterruptibleBlock);
-% Do's just add a transition, without adding a node
-instruction_size({do, _, _, _}) -> 0;
-instruction_size({do_scope, _, _, _}) -> 0;
-% Continue's just a transition.
-instruction_size({continue, _}) -> 0.
+  lists:foldl(fun(ChoiceBlock, Sum) ->
+              Sum + (block_size(ChoiceBlock)) end, 0, Choices);
+instruction_size(_) -> 0.
+
+% instruction_size({local_send, _, _}) -> 1;
+% instruction_size({local_receive, _, _}) -> 1;
+% instruction_size({local_call_request_send, _, _}) -> 1;
+% instruction_size({local_call_request_recv, _, _}) -> 1;
+% instruction_size({local_call_response_send, _, _}) -> 1;
+% instruction_size({local_call_response_recv, _, _}) -> 1;
+% instruction_size({choice, _, Choices}) ->
+%   % Final transition in the choice block goes to the end index
+%   BasicSize = lists:foldl(fun(ChoiceBlock, Sum) -> Sum + (block_size(ChoiceBlock)) end, 0, Choices),
+%   BasicSize;
+% instruction_size({rec, _, Block}) -> 1 + block_size(Block);
+% instruction_size({par, _ParallelBlocks}) -> 1; % Nested FSMs have their own internal numbering system
+% instruction_size({local_interruptible, _, InterruptibleBlock, _}) -> % Not supported.
+%   block_size(InterruptibleBlock);
+% instruction_size({local_interruptible_throw, _, InterruptibleBlock, _, _}) ->
+%   block_size(InterruptibleBlock);
+% % Do's just add a transition, without adding a node
+% instruction_size({do, _, _, _}) -> 0;
+% instruction_size({do_scope, _, _, _}) -> 0;
+% % Continue's just a transition.
+% instruction_size({continue, _}) -> 0.
 
 
 % add_state: Takes FSMState, returns (new state ID, new FSMState)
@@ -302,7 +310,7 @@ evaluate_block([X|XS], PrevIndex, EndIndex, FSMState, MonitorState) ->
        FSMState1 = evaluate_comm_transition(X, PrevIndex, FSMState),
        evaluate_block(XS, RunningID, EndIndex, FSMState1, MonitorState);
      not IsCommAction ->
-       ScopeEndIndex = RunningID + instruction_size(X) + 1,
+       ScopeEndIndex = RunningID + instruction_size(X),
        {FSMState1, MonitorState1} =
          evaluate_scope(X, PrevIndex, ScopeEndIndex, FSMState, MonitorState),
        FSMState2 = add_state(standard_state(), FSMState1),
