@@ -130,7 +130,8 @@ evaluate_nested_fsm(Block, FSMID, MonitorState) ->
 % evaluate_block([X|XS], PrevIndex, EndIndex, FSMState, MonitorState) ->
 
   ScopeEndIndex = block_size(Block) + 1,
-  EvalRes = evaluate_block(Block, 0, ScopeEndIndex, FSMState1, MonitorState2),
+  io:format("ScopeEndIndex top level: ~p~n", [ScopeEndIndex]),
+  EvalRes = evaluate_block(Block, 0, ScopeEndIndex, orddict:new(), FSMState1, MonitorState2),
   case EvalRes of
     {FSMState2, MonitorState3} ->
       FSMState3 = add_state(end_state(), FSMState2),
@@ -185,36 +186,18 @@ end_state() -> end_state.
 block_size([]) -> 0;
 block_size([X]) ->
   instruction_size(X);
+% FIXME: Hack
+block_size([{par, _}|XS]) -> block_size(XS);
+block_size([_|[{continue, _}|_]]) -> 0;
 block_size([X|XS]) ->
   instruction_size(X) + 1 + block_size(XS).
 
+instruction_size({rec, _, Block}) ->
+  block_size(Block);
 instruction_size({choice, _, Choices}) ->
   lists:foldl(fun(ChoiceBlock, Sum) ->
               Sum + (block_size(ChoiceBlock)) end, 0, Choices);
 instruction_size(_) -> 0.
-
-% instruction_size({local_send, _, _}) -> 1;
-% instruction_size({local_receive, _, _}) -> 1;
-% instruction_size({local_call_request_send, _, _}) -> 1;
-% instruction_size({local_call_request_recv, _, _}) -> 1;
-% instruction_size({local_call_response_send, _, _}) -> 1;
-% instruction_size({local_call_response_recv, _, _}) -> 1;
-% instruction_size({choice, _, Choices}) ->
-%   % Final transition in the choice block goes to the end index
-%   BasicSize = lists:foldl(fun(ChoiceBlock, Sum) -> Sum + (block_size(ChoiceBlock)) end, 0, Choices),
-%   BasicSize;
-% instruction_size({rec, _, Block}) -> 1 + block_size(Block);
-% instruction_size({par, _ParallelBlocks}) -> 1; % Nested FSMs have their own internal numbering system
-% instruction_size({local_interruptible, _, InterruptibleBlock, _}) -> % Not supported.
-%   block_size(InterruptibleBlock);
-% instruction_size({local_interruptible_throw, _, InterruptibleBlock, _, _}) ->
-%   block_size(InterruptibleBlock);
-% % Do's just add a transition, without adding a node
-% instruction_size({do, _, _, _}) -> 0;
-% instruction_size({do_scope, _, _, _}) -> 0;
-% % Continue's just a transition.
-% instruction_size({continue, _}) -> 0.
-
 
 % add_state: Takes FSMState, returns (new state ID, new FSMState)
 add_state(State, FSMState) ->
@@ -276,12 +259,39 @@ is_list_empty(_) -> false.
 % end index of the block, and FSM state.
 % Returns next ID, FSM with either a new state and a transition to it, or a transition
 %  to the end state added.
-evaluate_comm_transition(CommAST, PrevID, FSMState) ->
+
+evaluate_transition(X, [{continue, RecName}|_], PrevID, _EndIndex,
+                    RecMap, FSMState, MonitorState) ->
+  FSMState1 = evaluate_rec_transition(X, PrevID, RecName, RecMap, FSMState),
+  {FSMState1, MonitorState};
+evaluate_transition(X, [{par, ParallelBlocks}|XS], PrevID, EndIndex, RecMap, FSMState,
+                    MonitorState) ->
   RunningID = get_running_id(FSMState),
-  FSMState1 = add_state(standard_state(), FSMState),
+
+  {MonitorState1, NestedFSMIDs} = evaluate_parallel_blocks(ParallelBlocks,
+                                                           MonitorState, RecMap),
+  io:format("In Eval transition, X: ~p, PrevID: ~p, EndIndex: ~p, ~n XS: ~p~n",
+            [X, PrevID, EndIndex, XS]),
+  FSMState1 = evaluate_comm_transition(X, PrevID, par_state(NestedFSMIDs), FSMState),
+  evaluate_block(XS, RunningID, EndIndex, RecMap, FSMState1, MonitorState1);
+evaluate_transition(X, XS, PrevID, EndIndex, RecMap, FSMState, MonitorState) ->
+  RunningID = get_running_id(FSMState),
+  FSMState1 = evaluate_comm_transition(X, PrevID, standard_state(), FSMState),
+  evaluate_block(XS, RunningID, EndIndex, RecMap, FSMState1, MonitorState).
+
+
+evaluate_comm_transition(CommAST, PrevID, StateToAdd, FSMState) ->
+  RunningID = get_running_id(FSMState),
+  FSMState1 = add_state(StateToAdd, FSMState),
   add_comm_transition(CommAST, PrevID, RunningID, FSMState1).
 
-
+evaluate_rec_transition(CommAST, PrevID, RecName, RecMap, FSMState) ->
+  IDRes = orddict:find(RecName, RecMap),
+  case IDRes of
+    {ok, ID} ->
+      add_comm_transition(CommAST, PrevID, ID, FSMState);
+    _ -> error(rec_name_unbound)
+  end.
 
 % Takes the ID of the previously-created node, end index, FSM state, monitor state.
 % On each step?
@@ -291,81 +301,80 @@ evaluate_comm_transition(CommAST, PrevID, FSMState) ->
 % to new, predicated on the comm action, then recursively evaluate.
 % Return FSMState and MonitorState.
 %
-evaluate_block([], _PrevIndex, _EndIndex, FSMState, MonitorState) ->
+evaluate_block([], _PrevIndex, _EndIndex, _RecMap, FSMState, MonitorState) ->
   {FSMState, MonitorState};
-evaluate_block([X], PrevIndex, EndIndex, FSMState, MonitorState) ->
+% Par is (unfortunately) a bit of a special case, and we need to take some care with it.
+% Essentially, it should never be evaluated in this block.
+evaluate_block([{par, _}|_], _, _, _, _, _) -> error(eval_par);
+evaluate_block([X], PrevIndex, EndIndex, RecMap, FSMState, MonitorState) ->
   IsCommAction = is_comm_action(X),
   if IsCommAction ->
        % Add transition to the end node of the scope
        FSMState1 = add_comm_transition(X, PrevIndex, EndIndex, FSMState),
        {FSMState1, MonitorState};
      not IsCommAction ->
-       evaluate_scope(X, PrevIndex, EndIndex, FSMState, MonitorState)
+       evaluate_scope(X, PrevIndex, EndIndex, RecMap, FSMState, MonitorState)
   end;
-evaluate_block([X|XS], PrevIndex, EndIndex, FSMState, MonitorState) ->
+evaluate_block([X|XS], PrevIndex, EndIndex, RecMap, FSMState, MonitorState) ->
   IsCommAction = is_comm_action(X),
   RunningID = get_running_id(FSMState),
   if IsCommAction ->
-       % Add a new state, and make a transition to it.
-       FSMState1 = evaluate_comm_transition(X, PrevIndex, FSMState),
-       evaluate_block(XS, RunningID, EndIndex, FSMState1, MonitorState);
+       % Make a transition to PrevIndex, make a new state
+       evaluate_transition(X, XS, PrevIndex, EndIndex, RecMap, FSMState, MonitorState);
      not IsCommAction ->
        ScopeEndIndex = RunningID + instruction_size(X),
        {FSMState1, MonitorState1} =
-         evaluate_scope(X, PrevIndex, ScopeEndIndex, FSMState, MonitorState),
+         evaluate_scope(X, PrevIndex, ScopeEndIndex, RecMap, FSMState, MonitorState),
        FSMState2 = add_state(standard_state(), FSMState1),
        % PrevIndex here: end index of the scope.
-       evaluate_block(XS, ScopeEndIndex, EndIndex,
+       evaluate_block(XS, ScopeEndIndex, EndIndex, RecMap,
                       FSMState2, MonitorState1)
   end.
 
 
+% Evaluates parallel blocks.
+% Evaluates each block, stores in monitor state.
+% Returns {MonitorState, Block ID List}.
+evaluate_parallel_blocks(Blocks, MonitorState, RecMap) ->
+  evaluate_parallel_blocks_inner(Blocks, MonitorState, [], RecMap).
+
+evaluate_parallel_blocks_inner([], MonitorState, BlockIDs, _RecMap) ->
+  {MonitorState, BlockIDs};
+evaluate_parallel_blocks_inner([Block|ParallelBlocks], MonitorState, BlockIDs, RecMap) ->
+  FSMID = MonitorState#outer_monitor_gen_state.running_nested_fsm_id,
+  EvalRes = evaluate_nested_fsm(Block, FSMID, MonitorState),
+  case EvalRes of
+    {ok, NewMonitorState} ->
+      evaluate_parallel_blocks_inner(ParallelBlocks, NewMonitorState, [FSMID|BlockIDs], RecMap);
+    Other -> Other
+  end.
+
 % Evaluates a list of blocks.
 % Returns an FSMState and MonitorState, and a list of top IDs.
-evaluate_blocks([], _PrevIndex, _EndIndex, FSMState, MonitorState) ->
+evaluate_blocks([], _PrevIndex, _EndIndex, _RecMap, FSMState, MonitorState) ->
   {FSMState, MonitorState};
-evaluate_blocks([Block|Blocks], PrevIndex, EndIndex, FSMState, MonitorState) ->
-  {FSMState1, MonitorState1} = evaluate_block(Block, PrevIndex, EndIndex, FSMState, MonitorState),
-  evaluate_blocks(Blocks, PrevIndex, EndIndex, FSMState1, MonitorState1).
+evaluate_blocks([Block|Blocks], PrevIndex, EndIndex, RecMap, FSMState, MonitorState) ->
+  {FSMState1, MonitorState1} = evaluate_block(Block, PrevIndex, EndIndex, RecMap, FSMState, MonitorState),
+  evaluate_blocks(Blocks, PrevIndex, EndIndex, RecMap, FSMState1, MonitorState1).
 
 % Takes top-level scope AST, FSM state and monitor state.
 % Returns ID of top node, new FSM state, new monitor state.
-evaluate_scope({local_protocol, _, _, _, _, Block}, _PrevIndex, _EndIndex, FSMState,
-               MonitorState) ->
+evaluate_scope({local_protocol, _, _, _, _, Block}, _PrevIndex, _EndIndex, RecMap,
+               FSMState, MonitorState) ->
   ScopeEndIndex = instruction_size(Block),
-  {FSMState1, MonitorState1} = evaluate_block(Block, 0, ScopeEndIndex, FSMState, MonitorState),
+  {FSMState1, MonitorState1} = evaluate_block(Block, 0, ScopeEndIndex, RecMap, FSMState, MonitorState),
   FSMState2 = add_state(standard_state(), FSMState1),
   {FSMState2, MonitorState1};
+evaluate_scope({rec, RecName, Interactions}, PrevIndex, EndIndex, RecMap, FSMState,
+               MonitorState) ->
+  NewRecMap = orddict:store(RecName, PrevIndex, RecMap),
+  evaluate_block(Interactions, PrevIndex, EndIndex, NewRecMap, FSMState, MonitorState);
 evaluate_scope({choice, _, ChoiceBlocks}, PrevIndex, EndIndex,
-               FSMState, MonitorState) ->
+               RecMap, FSMState, MonitorState) ->
   % We have a choice block.
   % We need to evaluate each block in turn.
   % Each block needs to converge on the end index.
-  evaluate_blocks(ChoiceBlocks, PrevIndex, EndIndex, FSMState, MonitorState).
+  evaluate_blocks(ChoiceBlocks, PrevIndex, EndIndex, RecMap, FSMState, MonitorState).
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-  % Running ID: Last state + 1
-  %RunningID = get_running_id(FSMState),
-  %io:format("RunningID: ~p~nChoice instruction size: ~p~n", [RunningID, instruction_size(Choice)]),
-  %ScopeEndIndex = RunningID + instruction_size(Choice),
-  %{FSMState1, MonitorState1} = evaluate_blocks(ChoiceBlocks, PrevIndex,
-       %                                        ScopeEndIndex, FSMState, MonitorState),
-  % Now, we need a state at ScopeEndIndex (which *should* be RunningID)
-  % This is one place bugs could creep in...
-  %io:format("RunningID = ~p, ScopeEndIndex = ~p~n", [get_running_id(FSMState1), ScopeEndIndex]),
-  %FSMState2 = add_state(standard_state(), FSMState1),
-  %{FSMState2, MonitorState1}.
 
