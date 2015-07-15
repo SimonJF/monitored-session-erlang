@@ -350,6 +350,8 @@ evaluate_parallel_blocks(Blocks, MonitorState) ->
 
 evaluate_parallel_blocks_inner([], MonitorState, BlockIDs) ->
   {MonitorState, BlockIDs};
+evaluate_parallel_blocks_inner([[]|ParallelBlocks], MonitorState, BlockIDs) ->
+  evaluate_parallel_blocks_inner(ParallelBlocks, MonitorState, BlockIDs);
 evaluate_parallel_blocks_inner([Block|ParallelBlocks], MonitorState, BlockIDs) ->
   FSMID = MonitorState#outer_monitor_gen_state.running_nested_fsm_id,
   EvalRes = evaluate_nested_fsm(Block, FSMID, MonitorState),
