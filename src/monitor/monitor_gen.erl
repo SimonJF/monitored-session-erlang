@@ -18,7 +18,8 @@ graphviz_out(Transitions) ->
   io:format("digraph G {~n", []),
   orddict:fold((fun (S, TSet, _Acc) ->
                    % io:format("~p: ~w~n", [S, sets:to_list(TSet)]),
-                   lists:foreach(fun ({_, ToID, _, _, _}) ->
+                   lists:foreach(fun (T) ->
+                                     ToID = element(2, T),
                                      io:format("~w -> ~w~n", [S, ToID]) end, sets:to_list(TSet)),
                {} end), {}, Transitions),
   io:format("}~n", []).
@@ -171,9 +172,12 @@ send_call_response_transition(ToID, Recipient, MessageName, PayloadTypes) ->
 receive_call_response_transition(ToID, Sender, MessageName, PayloadTypes) ->
   {recv_call_response, ToID, Sender, MessageName, PayloadTypes}.
 
+par_transition(ToID, NestedFSMIDs) ->
+  {par_transition, ToID, NestedFSMIDs}.
+
 %%% State creation functions: Standard state, and a state "containing" nested FSMs
 standard_state() -> standard_state.
-par_state(NestedFSMIDs) -> {par_state, NestedFSMIDs}.
+%par_state(NestedFSMIDs) -> {par_state, NestedFSMIDs}.
 end_state() -> end_state.
 
 %%%%%%%%
@@ -183,7 +187,6 @@ end_state() -> end_state.
 block_size([]) -> 0;
 block_size([X]) ->
   instruction_size(X);
-block_size([{par, _}|XS]) -> block_size(XS);
 block_size([_|[{continue, _}|_]]) -> 0;
 block_size([X|XS]) ->
   instruction_size(X) + 1 + block_size(XS).
@@ -220,31 +223,43 @@ is_comm_action({local_call_request_send, _, _}) -> true;
 is_comm_action({local_call_request_recv, _, _}) -> true;
 is_comm_action({local_call_response_send, _, _}) -> true;
 is_comm_action({local_call_response_recv, _, _}) -> true;
+is_comm_action({par, _}) -> true;
 is_comm_action(_) -> false.
 
 
 unpack_sig({message_signature, Name, Types}) -> {Name, Types}.
 
 % Returns a new FSMState
-add_comm_transition({local_send, Sig, Participants}, FromID, ToID, FSMState) ->
+add_comm_transition({local_send, Sig, Participants}, FromID, ToID, FSMState, MonitorState) ->
   {Name, Types} = unpack_sig(Sig),
-  add_transition(FromID, send_transition(ToID, Participants, Name, Types), FSMState);
-add_comm_transition({local_receive, Sig, Participants}, FromID, ToID, FSMState) ->
+  FSMState1 = add_transition(FromID, send_transition(ToID, Participants, Name, Types), FSMState),
+  {FSMState1, MonitorState};
+add_comm_transition({local_receive, Sig, Participants}, FromID, ToID, FSMState, MonitorState) ->
   {Name, Types} = unpack_sig(Sig),
-  add_transition(FromID, receive_transition(ToID, Participants, Name, Types), FSMState);
-add_comm_transition({local_call_request_send, Sig, Participants}, FromID, ToID, FSMState) ->
+  FSMState1 = add_transition(FromID, receive_transition(ToID, Participants, Name, Types), FSMState),
+  {FSMState1, MonitorState};
+add_comm_transition({local_call_request_send, Sig, Participants}, FromID, ToID, FSMState, MonitorState) ->
   {Name, Types} = unpack_sig(Sig),
-  add_transition(FromID, send_call_request_transition(ToID, Participants, Name, Types), FSMState);
-add_comm_transition({local_call_request_recv, Sig, Participants}, FromID, ToID, FSMState) ->
+  FSMState1 = add_transition(FromID, send_call_request_transition(ToID, Participants, Name, Types), FSMState),
+  {FSMState1, MonitorState};
+add_comm_transition({local_call_request_recv, Sig, Participants}, FromID, ToID, FSMState, MonitorState) ->
   {Name, Types} = unpack_sig(Sig),
-  add_transition(FromID, receive_call_request_transition(ToID, Participants, Name, Types), FSMState);
-add_comm_transition({local_call_response_send, Sig, Participants}, FromID, ToID, FSMState) ->
+  FSMState1 = add_transition(FromID, receive_call_request_transition(ToID, Participants, Name, Types), FSMState),
+  {FSMState1, MonitorState};
+add_comm_transition({local_call_response_send, Sig, Participants}, FromID, ToID, FSMState, MonitorState) ->
   {Name, Types} = unpack_sig(Sig),
-  add_transition(FromID, send_call_response_transition(ToID, Participants, Name, Types), FSMState);
-add_comm_transition({local_call_response_recv, Sig, Participants}, FromID, ToID, FSMState) ->
+  FSMState1 = add_transition(FromID, send_call_response_transition(ToID, Participants, Name, Types), FSMState),
+  {FSMState1, MonitorState};
+add_comm_transition({local_call_response_recv, Sig, Participants}, FromID, ToID, FSMState, MonitorState) ->
   {Name, Types} = unpack_sig(Sig),
-  add_transition(FromID, receive_call_response_transition(ToID, Participants, Name, Types), FSMState);
-add_comm_transition(_, _, _, _) -> error(add_bad_transition).
+  FSMState1 = add_transition(FromID, receive_call_response_transition(ToID, Participants, Name, Types), FSMState),
+  {FSMState1, MonitorState};
+add_comm_transition({par, ParallelBlocks}, FromID, ToID, FSMState, MonitorState) ->
+  {MonitorState1, NestedFSMIDs} =
+    evaluate_parallel_blocks(ParallelBlocks, MonitorState),
+  FSMState1 = add_transition(FromID, par_transition(ToID, NestedFSMIDs), FSMState),
+  {FSMState1, MonitorState1};
+add_comm_transition(_, _, _, _, _) -> error(add_bad_transition).
 
 get_running_id(FSMState) -> FSMState#monitor_gen_state.running_id.
 
@@ -258,34 +273,32 @@ is_list_empty(_) -> false.
 
 evaluate_transition(X, [{continue, RecName}|_], PrevID, _EndIndex,
                     RecMap, FSMState, MonitorState) ->
-  FSMState1 = evaluate_rec_transition(X, PrevID, RecName, RecMap, FSMState),
-  {FSMState1, MonitorState};
-evaluate_transition(X, [{par, ParallelBlocks}|XS], PrevID, EndIndex, RecMap, FSMState,
-                    MonitorState) ->
-  RunningID = get_running_id(FSMState),
-
-  {MonitorState1, NestedFSMIDs} = evaluate_parallel_blocks(ParallelBlocks,
-                                                           MonitorState, RecMap),
-  io:format("In Eval transition, X: ~p, PrevID: ~p, EndIndex: ~p, ~n XS: ~p~n",
-            [X, PrevID, EndIndex, XS]),
-  FSMState1 = evaluate_comm_transition(X, PrevID, par_state(NestedFSMIDs), FSMState),
-  evaluate_block(XS, RunningID, EndIndex, RecMap, FSMState1, MonitorState1);
+  evaluate_rec_transition(X, PrevID, RecName, RecMap, FSMState, MonitorState);
+%evaluate_transition(X, [{par, ParallelBlocks}|XS], PrevID, EndIndex, RecMap, FSMState,
+%                    MonitorState) ->
+%  RunningID = get_running_id(FSMState),
+%
+%  {MonitorState1, NestedFSMIDs} = evaluate_parallel_blocks(ParallelBlocks,
+%                                                           MonitorState, RecMap),
+%  FSMState1 = evaluate_comm_transition(X, PrevID, par_state(NestedFSMIDs), FSMState),
+%  evaluate_block(XS, RunningID, EndIndex, RecMap, FSMState1, MonitorState1);
 evaluate_transition(X, XS, PrevID, EndIndex, RecMap, FSMState, MonitorState) ->
   RunningID = get_running_id(FSMState),
-  FSMState1 = evaluate_comm_transition(X, PrevID, standard_state(), FSMState),
-  evaluate_block(XS, RunningID, EndIndex, RecMap, FSMState1, MonitorState).
+  {FSMState1, MonitorState1} =
+    evaluate_comm_transition(X, PrevID, standard_state(), FSMState, MonitorState),
+  evaluate_block(XS, RunningID, EndIndex, RecMap, FSMState1, MonitorState1).
 
 
-evaluate_comm_transition(CommAST, PrevID, StateToAdd, FSMState) ->
+evaluate_comm_transition(CommAST, PrevID, StateToAdd, FSMState, MonitorState) ->
   RunningID = get_running_id(FSMState),
   FSMState1 = add_state(StateToAdd, FSMState),
-  add_comm_transition(CommAST, PrevID, RunningID, FSMState1).
+  add_comm_transition(CommAST, PrevID, RunningID, FSMState1, MonitorState).
 
-evaluate_rec_transition(CommAST, PrevID, RecName, RecMap, FSMState) ->
+evaluate_rec_transition(CommAST, PrevID, RecName, RecMap, FSMState, MonitorState) ->
   IDRes = orddict:find(RecName, RecMap),
   case IDRes of
     {ok, ID} ->
-      add_comm_transition(CommAST, PrevID, ID, FSMState);
+      add_comm_transition(CommAST, PrevID, ID, FSMState, MonitorState);
     _ -> error(rec_name_unbound)
   end.
 
@@ -301,15 +314,16 @@ evaluate_block([], _PrevIndex, _EndIndex, _RecMap, FSMState, MonitorState) ->
   {FSMState, MonitorState};
 % Par is (unfortunately) a bit of a special case, and we need to take some care with it.
 % Essentially, it should never be evaluated in this block.
-evaluate_block([{par, _}|_], _, _, _, _, _) -> error(eval_par);
+% evaluate_block([{par, _}|_], _, _, _, _, _) -> error(eval_par);
+evaluate_block([{continue, _}|_], _, _, _, FSMState, MonitorState) ->
+  {FSMState, MonitorState};
 evaluate_block([X], PrevIndex, EndIndex, RecMap, FSMState, MonitorState) ->
   IsCommAction = is_comm_action(X),
   if IsCommAction ->
        % Add transition to the end node of the scope
-       FSMState1 = add_comm_transition(X, PrevIndex, EndIndex, FSMState),
-       {FSMState1, MonitorState};
+       add_comm_transition(X, PrevIndex, EndIndex, FSMState, MonitorState);
      not IsCommAction ->
-       evaluate_scope(X, PrevIndex, EndIndex, RecMap, FSMState, MonitorState)
+       evaluate_scope(X, [], PrevIndex, EndIndex, RecMap, FSMState, MonitorState)
   end;
 evaluate_block([X|XS], PrevIndex, EndIndex, RecMap, FSMState, MonitorState) ->
   IsCommAction = is_comm_action(X),
@@ -320,7 +334,7 @@ evaluate_block([X|XS], PrevIndex, EndIndex, RecMap, FSMState, MonitorState) ->
      not IsCommAction ->
        ScopeEndIndex = RunningID + instruction_size(X),
        {FSMState1, MonitorState1} =
-         evaluate_scope(X, PrevIndex, ScopeEndIndex, RecMap, FSMState, MonitorState),
+         evaluate_scope(X, XS, PrevIndex, ScopeEndIndex, RecMap, FSMState, MonitorState),
        FSMState2 = add_state(standard_state(), FSMState1),
        % PrevIndex here: end index of the scope.
        evaluate_block(XS, ScopeEndIndex, EndIndex, RecMap,
@@ -331,17 +345,17 @@ evaluate_block([X|XS], PrevIndex, EndIndex, RecMap, FSMState, MonitorState) ->
 % Evaluates parallel blocks.
 % Evaluates each block, stores in monitor state.
 % Returns {MonitorState, Block ID List}.
-evaluate_parallel_blocks(Blocks, MonitorState, RecMap) ->
-  evaluate_parallel_blocks_inner(Blocks, MonitorState, [], RecMap).
+evaluate_parallel_blocks(Blocks, MonitorState) ->
+  evaluate_parallel_blocks_inner(Blocks, MonitorState, []).
 
-evaluate_parallel_blocks_inner([], MonitorState, BlockIDs, _RecMap) ->
+evaluate_parallel_blocks_inner([], MonitorState, BlockIDs) ->
   {MonitorState, BlockIDs};
-evaluate_parallel_blocks_inner([Block|ParallelBlocks], MonitorState, BlockIDs, RecMap) ->
+evaluate_parallel_blocks_inner([Block|ParallelBlocks], MonitorState, BlockIDs) ->
   FSMID = MonitorState#outer_monitor_gen_state.running_nested_fsm_id,
   EvalRes = evaluate_nested_fsm(Block, FSMID, MonitorState),
   case EvalRes of
     {ok, NewMonitorState} ->
-      evaluate_parallel_blocks_inner(ParallelBlocks, NewMonitorState, [FSMID|BlockIDs], RecMap);
+      evaluate_parallel_blocks_inner(ParallelBlocks, NewMonitorState, [FSMID|BlockIDs]);
     Other -> Other
   end.
 
@@ -355,17 +369,27 @@ evaluate_blocks([Block|Blocks], PrevIndex, EndIndex, RecMap, FSMState, MonitorSt
 
 % Takes top-level scope AST, FSM state and monitor state.
 % Returns ID of top node, new FSM state, new monitor state.
-evaluate_scope({local_protocol, _, _, _, _, Block}, _PrevIndex, _EndIndex, RecMap,
+evaluate_scope(X, [{continue, RecName}|_], PrevID, _EndIndex,
+                    RecMap, FSMState, MonitorState) ->
+  io:format("In eval scope continue~n"),
+  RecID = orddict:fetch(RecName, RecMap),
+  evaluate_scope_inner(X, PrevID, RecID, RecMap, FSMState, MonitorState);
+evaluate_scope(X, _, PrevID, EndIndex, RecMap, FSMState, MonitorState) ->
+  evaluate_scope_inner(X, PrevID, EndIndex, RecMap, FSMState, MonitorState).
+
+
+
+evaluate_scope_inner({local_protocol, _, _, _, _, Block}, _PrevIndex, _EndIndex, RecMap,
                FSMState, MonitorState) ->
   ScopeEndIndex = instruction_size(Block),
   {FSMState1, MonitorState1} = evaluate_block(Block, 0, ScopeEndIndex, RecMap, FSMState, MonitorState),
   FSMState2 = add_state(standard_state(), FSMState1),
   {FSMState2, MonitorState1};
-evaluate_scope({rec, RecName, Interactions}, PrevIndex, EndIndex, RecMap, FSMState,
+evaluate_scope_inner({rec, RecName, Interactions}, PrevIndex, EndIndex, RecMap, FSMState,
                MonitorState) ->
   NewRecMap = orddict:store(RecName, PrevIndex, RecMap),
   evaluate_block(Interactions, PrevIndex, EndIndex, NewRecMap, FSMState, MonitorState);
-evaluate_scope({choice, _, ChoiceBlocks}, PrevIndex, EndIndex,
+evaluate_scope_inner({choice, _, ChoiceBlocks}, PrevIndex, EndIndex,
                RecMap, FSMState, MonitorState) ->
   % We have a choice block.
   % We need to evaluate each block in turn.
