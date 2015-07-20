@@ -232,7 +232,7 @@ roleinstantiationlistinner -> comma roleinstantiation roleinstantiationlistinner
 
 
 roleinstantiation -> identifier : scribble_ast:role_instantiation('$1').
-roleinstantiation -> new_kw identifier : scribble_ast:new_role_instantiation('$1').
+roleinstantiation -> new_kw identifier : scribble_ast:new_role_instantiation('$2').
 roleinstantiation -> identifier as_kw identifier : scribble_ast:role_instantiation('$1', '$3').
 
 argumentlist -> less_than argument argumentlistinner greater_than :
