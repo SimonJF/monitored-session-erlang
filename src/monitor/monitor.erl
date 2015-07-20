@@ -372,7 +372,7 @@ start_subsession(SubsessionName, InternalInvitations,
                                     ExternalInvitations}}, MonitorInstance).
 
 subsession_success(MonitorInstance) ->
-  check_action({subsession_action, {start_subsession}}, MonitorInstance).
+  check_action({subsession_action, {subsession_success}}, MonitorInstance).
 
 subsession_failure(FailureName, MonitorInstance) ->
   check_action({subsession_action, {subsession_failure, FailureName}},

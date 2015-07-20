@@ -241,4 +241,67 @@ par2_test1_test() ->
   ParMsg9 = message:message(0, "A", ["B"], "Msg5", [], []),
   {ok, _MonitorInstance10} = monitor:send(ParMsg9, MonitorInstance9).
 
+subsession_test_setup() ->
+  % Get all the boring junk out of the way first
+  Filename = ?SPEC_DIRECTORY ++ "TravelBookingSplit_TravelAgent.scr",
+  ProtocolName = "BookTravel",
+  RoleName = "TravelAgent",
+  {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
+  ?assertNot(monitor:is_ended(MonitorInstance)),
+  Msg1 = message:message(0, "Customer", ["TravelAgent"], "customerRequest",
+                         [], [blah]),
+  {ok, MonitorInstance1} = monitor:recv(Msg1, MonitorInstance),
+  Msg2 = message:message(0, "TravelAgent", ["FlightBookingService"], "flightInfoRequest",
+                         [], [blah]),
+  Msg3 = message:message(0, "TravelAgent", ["HotelBookingService"], "hotelInfoRequest",
+                         [], [blah]),
+  {ok, MonitorInstance2} = monitor:send(Msg2, MonitorInstance1),
+  {ok, MonitorInstance3} = monitor:send(Msg3, MonitorInstance2),
+  Msg4 = message:message(0, "FlightBookingService", ["TravelAgent"], "flightInfoResponse",
+                         [], [blah, blah]),
+  Msg5 = message:message(0, "HotelBookingService", ["TravelAgent"], "hotelInfoResponse",
+                         [], [blah]),
+  {ok, MonitorInstance4} = monitor:recv(Msg4, MonitorInstance3),
+  {ok, MonitorInstance5} = monitor:recv(Msg5, MonitorInstance4),
+  Msg6 = message:message(0, "TravelAgent", ["Customer"], "customerResponse",
+                         [], [blah, blah, blah]),
+  {ok, MonitorInstance6} = monitor:send(Msg6, MonitorInstance5),
+  Msg7 = message:message(0, "Customer", ["TravelAgent"], "proceedWithBooking",
+                         [], [blah, blah, blah]),
+  monitor:recv(Msg7, MonitorInstance6).
 
+% Basic case -- all subsessions work fine
+subsession_test1_test() ->
+  {ok, MonitorInstance} = subsession_test_setup(),
+  {ok, MonitorInstance1} = monitor:start_subsession("PerformBooking", ["TravelAgent", "Customer"],
+                                                    ["FlightBookingService", "HotelBookingService"], MonitorInstance),
+  {ok, MonitorInstance2} = monitor:subsession_success(MonitorInstance1),
+  {ok, MonitorInstance3} = monitor:start_subsession("PerformPayment", ["TravelAgent", "PaymentProcessor"], [], MonitorInstance2),
+  {ok, MonitorInstance4} = monitor:subsession_success(MonitorInstance3),
+  Msg1 = message:message(0, "TravelAgent", ["Customer"], "confirmation", [], []),
+  {ok, MonitorInstance5} = monitor:send(Msg1, MonitorInstance4),
+  ?assert(monitor:is_ended(MonitorInstance5)).
+
+% Check failure handling blocks
+subsession_test2_test() ->
+  {ok, MonitorInstance} = subsession_test_setup(),
+  {ok, MonitorInstance1} = monitor:start_subsession("PerformBooking", ["TravelAgent", "Customer"],
+                                                    ["FlightBookingService", "HotelBookingService"], MonitorInstance),
+  {ok, MonitorInstance2} = monitor:subsession_failure("BookingFailure", MonitorInstance1),
+  Msg1 = message:message(0, "TravelAgent", ["Customer"], "bookingFail", [], []),
+  {ok, MonitorInstance3} = monitor:send(Msg1, MonitorInstance2),
+  {ok, _MonitorInstance4} = monitor:start_subsession("CancelBookings", ["TravelAgent"],
+                                                     ["FlightBookingService", "HotelBookingService"], MonitorInstance3).
+% Check start session monitoring works
+% Bad name
+subsession_bad1_test() ->
+  {ok, MonitorInstance} = subsession_test_setup(),
+  {error, _} = monitor:start_subsession("PerformBookingWrongName", ["TravelAgent", "Customer"],
+                                        ["FlightBookingService", "HotelBookingService"], MonitorInstance).
+
+% Check start session monitoring works
+% Bad Internal
+subsession_bad2_test() ->
+  {ok, MonitorInstance} = subsession_test_setup(),
+  {error, _} = monitor:start_subsession("PerformBooking", ["Customer"],
+                                        ["TravelBooking", "FlightBookingService", "HotelBookingService"], MonitorInstance).

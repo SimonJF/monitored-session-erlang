@@ -175,7 +175,7 @@ par_transition(ToID, NestedFSMIDs) ->
 
 start_subsession_transition(ToID, SubsessionName, RoleInstantiationList) ->
   {ExternalRoles, InternalRoles} = get_instantiate_roles(RoleInstantiationList),
-  {start_subsession, ToID, SubsessionName, ExternalRoles, InternalRoles}.
+  {start_subsession, ToID, SubsessionName, InternalRoles, ExternalRoles}.
 
 subsession_success_transition(ToID) ->
   {subsession_success, ToID}.
