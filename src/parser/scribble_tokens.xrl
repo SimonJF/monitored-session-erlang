@@ -117,7 +117,8 @@ Rules.
 {SEND_CALL_RESPONSE} : make_token(send_call_response_kw, TokenLine, TokenChars).
 {RECV_CALL_REQ} : make_token(receive_call_request_kw, TokenLine, TokenChars).
 {RECV_CALL_RESPONSE} : make_token(receive_call_response_kw, TokenLine, TokenChars).
-{SUBSESSIONKW} : make_token(subsession_kw, TokenLine, TokenChars).
+{HANDLEKW} : make_token(handle_kw, TokenLine, TokenChars).
+{INITIATESKW} : make_token(initiates_kw, TokenLine, TokenChars).
 {NEWKW} : make_token(new_kw, TokenLine, TokenChars).
 
 
