@@ -40,7 +40,6 @@ print_fsm(States, Transitions) ->
 
 
 test_fsm(Filename) ->
-  io:format("In test_fsm~n"),
   ParseResult = scribble_lexer:parse(Filename),
   case ParseResult of
     {error, file_open_error, Error} ->
@@ -131,7 +130,6 @@ evaluate_nested_fsm(Block, FSMID, MonitorState) ->
 % evaluate_block([X|XS], PrevIndex, EndIndex, FSMState, MonitorState) ->
 
   ScopeEndIndex = block_size(Block) + 1,
-  io:format("ScopeEndIndex top level: ~p~n", [ScopeEndIndex]),
   EvalRes = evaluate_block(Block, 0, ScopeEndIndex, orddict:new(), FSMState1, MonitorState2),
   case EvalRes of
     {FSMState2, MonitorState3} ->
@@ -175,6 +173,15 @@ receive_call_response_transition(ToID, Sender, MessageName, PayloadTypes) ->
 par_transition(ToID, NestedFSMIDs) ->
   {par_transition, ToID, NestedFSMIDs}.
 
+start_subsession_transition(ToID, SubsessionName, RoleInstantiationList) ->
+  {start_subsession_transition, ToID, SubsessionName, RoleInstantiationList}.
+
+subsession_success_transition(ToID) ->
+  {subsession_success_transition, ToID}.
+
+subsession_failure_transition(ToID, FailureName) ->
+  {subsession_failure_transition, ToID, FailureName}.
+
 %%% State creation functions: Standard state, and a state "containing" nested FSMs
 standard_state() -> standard_state.
 %par_state(NestedFSMIDs) -> {par_state, NestedFSMIDs}.
@@ -193,10 +200,20 @@ block_size([X|XS]) ->
 
 instruction_size({rec, _, Block}) ->
   block_size(Block);
+instruction_size({local_initiates, _, SN, _, SuccessBlock, HandleBlocks}) ->
+  HandleBlocksSize = lists:foldl(fun(HB = {handle_block, _, Block}, Sum) ->
+                                     Sum + initiates_size(Block) end, 0, HandleBlocks),
+  SuccessBlockSize = initiates_size(SuccessBlock),
+  HandleBlocksSize + SuccessBlockSize + 1;
 instruction_size({choice, _, Choices}) ->
   lists:foldl(fun(ChoiceBlock, Sum) ->
               Sum + (block_size(ChoiceBlock)) end, 0, Choices);
-instruction_size(_) -> 0.
+instruction_size(Other) -> 0.
+
+initiates_size([]) -> 0;
+initiates_size([{continue, _}|_]) -> 0;
+initiates_size([X]) -> 1 + instruction_size(X);
+initiates_size([X|XS]) -> 1 + block_size([X|XS]).
 
 % add_state: Takes FSMState, returns (new state ID, new FSMState)
 add_state(State, FSMState) ->
@@ -259,6 +276,11 @@ add_comm_transition({par, ParallelBlocks}, FromID, ToID, FSMState, MonitorState)
     evaluate_parallel_blocks(ParallelBlocks, MonitorState),
   FSMState1 = add_transition(FromID, par_transition(ToID, NestedFSMIDs), FSMState),
   {FSMState1, MonitorState1};
+add_comm_transition({local_initiates, _, SubsessionName, RIL, _, _},
+                              FromID, ToID, FSMState, MonitorState) ->
+  NewTransition = start_subsession_transition(ToID, SubsessionName, RIL),
+  FSMState1 = add_transition(FromID, NewTransition, FSMState),
+  {FSMState1, MonitorState};
 add_comm_transition(_, _, _, _, _) -> error(add_bad_transition).
 
 get_running_id(FSMState) -> FSMState#monitor_gen_state.running_id.
@@ -369,11 +391,78 @@ evaluate_blocks([Block|Blocks], PrevIndex, EndIndex, RecMap, FSMState, MonitorSt
   {FSMState1, MonitorState1} = evaluate_block(Block, PrevIndex, EndIndex, RecMap, FSMState, MonitorState),
   evaluate_blocks(Blocks, PrevIndex, EndIndex, RecMap, FSMState1, MonitorState1).
 
+
+evaluate_initiates(X = {local_initiates, _, _, _, Success, HBs},
+                   PrevIndex, EndIndex, RecMap, FSMState, MonitorState) ->
+  % Start subsession state
+  InitiatesStateID = get_running_id(FSMState),
+  {FSMState1, MonitorState1} =
+    evaluate_comm_transition(X, PrevIndex, standard_state(), FSMState, MonitorState),
+  % Now, we need states for all possible results of the subsession.
+  % Evaluate the success block
+  FSMState2 = add_subsession_success_transition(Success, RecMap, InitiatesStateID, EndIndex, FSMState1),
+  SuccessStateID = get_running_id(FSMState1),
+  {FSMState3, MonitorState2} =
+    evaluate_block(Success, SuccessStateID, EndIndex, RecMap, FSMState2, MonitorState1),
+  % Finally, evaluate all of the handler blocks.
+  evaluate_handle_blocks(HBs, InitiatesStateID, EndIndex, RecMap, FSMState3, MonitorState2).
+
+
+add_subsession_failure_transition(FailureName, [], _, PrevIndex, EndIndex, FSMState) ->
+  Transition = subsession_failure_transition(FailureName, EndIndex),
+  add_transition(PrevIndex, Transition, FSMState);
+add_subsession_failure_transition(FailureName, [{continue, RecName}|_], RecMap, PrevIndex, _, FSMState) ->
+  IDRes = orddict:find(RecName, RecMap),
+  case IDRes of
+    {ok, ID} ->
+      Transition = subsession_failure_transition(ID, FailureName),
+      add_transition(PrevIndex, Transition, FSMState);
+    _ -> error(rec_name_unbound)
+  end;
+add_subsession_failure_transition(FailureName, _, _, PrevIndex, _, FSMState) ->
+  RunningID = get_running_id(FSMState),
+  FSMState1 = add_state(standard_state(), FSMState),
+  Transition = subsession_failure_transition(RunningID, FailureName),
+  add_transition(PrevIndex, Transition, FSMState1).
+
+
+
+add_subsession_success_transition([], _, PrevIndex, EndIndex, FSMState) ->
+  Transition = subsession_success_transition(EndIndex),
+  add_transition(PrevIndex, Transition, FSMState);
+add_subsession_success_transition([{continue, RecName}|_], RecMap, PrevIndex, _, FSMState) ->
+  IDRes = orddict:find(RecName, RecMap),
+  case IDRes of
+    {ok, ID} ->
+      Transition = subsession_success_transition(ID),
+      add_transition(PrevIndex, Transition, FSMState);
+    _ -> error(rec_name_unbound)
+  end;
+add_subsession_success_transition(_, _, PrevIndex, _, FSMState) ->
+  RunningID = get_running_id(FSMState),
+  FSMState1 = add_state(standard_state(), FSMState),
+  Transition = subsession_success_transition(RunningID),
+  add_transition(PrevIndex, Transition, FSMState1).
+
+%add_transition(FromID, Transition, FSMState) ->
+
+
+evaluate_handle_blocks([], _, _, _, FSMState, MonitorState) ->
+  {FSMState, MonitorState};
+evaluate_handle_blocks([HB|HBs], PrevIndex, EndIndex, RecMap, FSMState, MonitorState) ->
+  RunningID = get_running_id(FSMState),
+  {handle_block, FailureName, Interactions} = HB,
+  FSMState1 = add_subsession_failure_transition(FailureName, Interactions, RecMap,
+                                                PrevIndex, EndIndex, FSMState),
+  {FSMState2, MonitorState1} =
+    evaluate_block(Interactions, RunningID, EndIndex, RecMap, FSMState1, MonitorState),
+  evaluate_handle_blocks(HBs, PrevIndex, EndIndex, RecMap, FSMState2, MonitorState1).
+
+
 % Takes top-level scope AST, FSM state and monitor state.
 % Returns ID of top node, new FSM state, new monitor state.
 evaluate_scope(X, [{continue, RecName}|_], PrevID, _EndIndex,
                     RecMap, FSMState, MonitorState) ->
-  io:format("In eval scope continue~n"),
   RecID = orddict:fetch(RecName, RecMap),
   evaluate_scope_inner(X, PrevID, RecID, RecMap, FSMState, MonitorState);
 evaluate_scope(X, _, PrevID, EndIndex, RecMap, FSMState, MonitorState) ->
@@ -396,7 +485,8 @@ evaluate_scope_inner({choice, _, ChoiceBlocks}, PrevIndex, EndIndex,
   % We have a choice block.
   % We need to evaluate each block in turn.
   % Each block needs to converge on the end index.
-  evaluate_blocks(ChoiceBlocks, PrevIndex, EndIndex, RecMap, FSMState, MonitorState).
-
-
+  evaluate_blocks(ChoiceBlocks, PrevIndex, EndIndex, RecMap, FSMState, MonitorState);
+evaluate_scope_inner(X = {local_initiates, _, _, _, _, _}, PrevIndex, EndIndex, RecMap,
+                     FSMState, MonitorState) ->
+  evaluate_initiates(X, PrevIndex, EndIndex, RecMap, FSMState, MonitorState).
 
