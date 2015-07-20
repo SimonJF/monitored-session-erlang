@@ -75,8 +75,9 @@ SEND_CALL_REQ = send_call_request
 SEND_CALL_RESPONSE = send_call_response
 RECV_CALL_REQ = receive_call_request
 RECV_CALL_RESPONSE = receive_call_response
-SUBSESSIONKW = subsession
 NEWKW = new
+INITIATESKW = initiates
+HANDLEKW = handle
 
 
 % --- Lexer Rules ---

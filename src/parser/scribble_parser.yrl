@@ -82,7 +82,9 @@ localsendcallreq
 localrecvcallreq
 localsendcallresp
 localrecvcallresp
-localsubsession.
+localinitiates
+handleblock
+handleblocks.
 
 
 
@@ -96,8 +98,8 @@ left_brace right_brace left_bracket right_bracket left_square_bracket
 right_square_bracket colon forward_slash back_slash dot hash ampersand
 question_mark exlamation_mark underscore comma semicolon less_than greater_than
 ident ext_ident transient_kw invitation_kw for_kw send_call_request_kw
-send_call_response_kw receive_call_request_kw receive_call_response_kw
-subsession_kw new_kw.
+send_call_response_kw receive_call_request_kw receive_call_response_kw handle_kw
+initiates_kw new_kw.
 
 
 % Module is the root symbol.
@@ -353,6 +355,16 @@ localinteraction -> localrecvcallreq : '$1'.
 localinteraction -> localsendcallresp : '$1'.
 localinteraction -> localrecvcallresp : '$1'.
 localinteraction -> localinvites : '$1'.
+localinteraction -> localinitiates : '$1'.
+
+localinitiates -> identifier initiates_kw identifier roleinstantiationlist localprotocolblock handleblocks:
+  scribble_ast:local_initiates('$1', '$3', '$4', '$5', '$6').
+
+handleblocks -> empty : [].
+handleblocks -> handleblock handleblocks : ['$1'|'$2'].
+
+handleblock -> handle_kw left_bracket identifier right_bracket localprotocolblock :
+  scribble_ast:handle_block('$3', '$5').
 
 localsend -> message to_kw identifier identifierlist semicolon:
   scribble_ast:local_send('$1', ['$3'|'$4']).
@@ -416,9 +428,6 @@ localsendcallresp -> send_call_response_kw messagesignature to_kw identifier sem
 
 localrecvcallresp -> receive_call_response_kw messagesignature from_kw identifier semicolon:
   scribble_ast:local_call_response_recv('$2', '$4').
-
-localsubsession -> subsession_kw identifier roleinstantiationlist semicolon:
-  scribble_ast:local_subsession('$2', '$3').
 
 Erlang code.
 unwrap({_, V}) -> V;

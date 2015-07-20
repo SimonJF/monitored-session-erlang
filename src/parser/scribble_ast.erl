@@ -185,3 +185,10 @@ local_call_response_send(MessageSignature, Sender) ->
 local_call_response_recv(MessageSignature, Sender) ->
   {local_call_response_recv, MessageSignature, Sender}.
 
+local_initiates(InitiatorRole, SubsessionName, RoleInstantiationList,
+                SuccessBlock, HandleBlocks) ->
+  {local_initiates, InitiatorRole, SubsessionName, RoleInstantiationList,
+   SuccessBlock, HandleBlocks}.
+
+handle_block(FailureName, Block) ->
+  {handle_block, FailureName, Block}.
