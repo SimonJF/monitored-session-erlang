@@ -174,13 +174,14 @@ par_transition(ToID, NestedFSMIDs) ->
   {par_transition, ToID, NestedFSMIDs}.
 
 start_subsession_transition(ToID, SubsessionName, RoleInstantiationList) ->
-  {start_subsession_transition, ToID, SubsessionName, RoleInstantiationList}.
+  {ExternalRoles, InternalRoles} = get_instantiate_roles(RoleInstantiationList),
+  {start_subsession, ToID, SubsessionName, ExternalRoles, InternalRoles}.
 
 subsession_success_transition(ToID) ->
-  {subsession_success_transition, ToID}.
+  {subsession_success, ToID}.
 
 subsession_failure_transition(ToID, FailureName) ->
-  {subsession_failure_transition, ToID, FailureName}.
+  {subsession_failure, ToID, FailureName}.
 
 %%% State creation functions: Standard state, and a state "containing" nested FSMs
 standard_state() -> standard_state.
@@ -190,6 +191,13 @@ end_state() -> end_state.
 %%%%%%%%
 %%% Internal Monitor Generation Functions
 %%%%%%%%
+get_instantiate_roles(XS) -> get_instantiate_roles_inner(XS, [], []).
+
+get_instantiate_roles_inner([], External, Internal) -> {External, Internal};
+get_instantiate_roles_inner([{role_instantiation, Name}|XS], External, Internal) ->
+  get_instantiate_roles_inner(XS, [Name|External], Internal);
+get_instantiate_roles_inner([{new_role_instantiation, Name}|XS], External, Internal) ->
+  get_instantiate_roles_inner(XS, External, [Name|Internal]).
 
 block_size([]) -> 0;
 block_size([X]) ->

@@ -154,9 +154,9 @@ instantiate_nested_fsms([FSMID|FSMIDs], MonitorInstance) ->
     MonitorInstance#outer_monitor_instance{monitor_instances=MonitorInstanceDict1},
   instantiate_nested_fsms(FSMIDs, MonitorInstance1).
 
-check_nested_fsms([], _, _, _) ->
+check_nested_fsms([], _, _) ->
   {error, no_nested_fsm_match};
-check_nested_fsms(IDList = [NestedID|_], InteractionType, Message, MonitorInstance) ->
+check_nested_fsms(IDList = [NestedID|_], Action, MonitorInstance) ->
   % First, check whether the FSM exists (has been instantiated) -- if not, instantiate it
   MonitorInstanceDict = MonitorInstance#outer_monitor_instance.monitor_instances,
   KeyExists = orddict:is_key(NestedID, MonitorInstanceDict),
@@ -164,29 +164,28 @@ check_nested_fsms(IDList = [NestedID|_], InteractionType, Message, MonitorInstan
     if not KeyExists -> instantiate_nested_fsms(IDList, MonitorInstance);
        KeyExists -> MonitorInstance
     end,
-  check_nested_fsms_inner(IDList, InteractionType, Message, MonitorInstance1).
+  check_nested_fsms_inner(IDList, Action, MonitorInstance1).
 
-check_nested_fsms_inner([], _, _, _) ->
+check_nested_fsms_inner([], _, _) ->
   {error, no_nested_fsm_match};
-check_nested_fsms_inner([NestedID|IDs], InteractionType, Message, MonitorInstance) ->
-  CheckRes = check_message_in(InteractionType, Message, NestedID, MonitorInstance),
+check_nested_fsms_inner([NestedID|IDs], Action, MonitorInstance) ->
+  CheckRes = check_action_in(Action, NestedID, MonitorInstance),
   % Go with the first match. If there are no matches, reject the message.
   case CheckRes of
     {ok, MonitorInstance1} -> {ok, MonitorInstance1};
     _ ->
       % If not, check the next one
-      check_nested_fsms(IDs, InteractionType, Message, MonitorInstance)
+      check_nested_fsms(IDs, Action, MonitorInstance)
   end.
 
 % Checks for the first possible transition (MSAs are deterministic).
 % Returns either {error, Err} or
 % {ok, NextStateID, NewMonitorInstance, bool describing whether or not the
 %   transition happened in a nested FSM}
-check_transitions([], _, _, _, _) -> {error, bad_message};
-check_transitions([Transition = {par_transition, _NextStateID, NestedFSMIDs}|TS], InteractionType,
-  Message, FSMState, Monitor) ->
-  CheckRes = check_nested_fsms(NestedFSMIDs, InteractionType, Message,
-                               Monitor),
+check_transitions([], _, _, _) -> {error, bad_message};
+check_transitions([Transition = {par_transition, _NextStateID, NestedFSMIDs}|TS],
+                  Action, FSMState, Monitor) ->
+  CheckRes = check_nested_fsms(NestedFSMIDs, Action, Monitor),
   case CheckRes of
     {ok, NewMonitor} ->
       % Need to distinguish between staying on the same state and updating internally,
@@ -195,16 +194,10 @@ check_transitions([Transition = {par_transition, _NextStateID, NestedFSMIDs}|TS]
       % Check whether the nested FSMs are all finished...
       FSMsFinished = check_nested_fsms_ended(NestedFSMIDs, NewMonitor),
       {ok, Transition, NewMonitor, not FSMsFinished};
-      %if FSMsFinished ->
-      %     {ok, NextStateID, NewMonitor, false};
-      %   not FSMsFinished ->
-      %     {ok, CurrentID, NewMonitor, true}
-      %end;
-    _ -> check_transitions(TS, InteractionType, Message, FSMState, Monitor)
+    _ -> check_transitions(TS, Action, FSMState, Monitor)
   end;
-check_transitions([T|TS], InteractionType, Message, FSMState, Monitor) ->
+check_transitions([T|TS], Action={message, {InteractionType, Message}}, FSMState, Monitor) ->
   TransitionType = element(1, T),
-  NextStateID = element(2, T),
   if TransitionType == InteractionType ->
        CanTakeTransition =
          case transition_kind(TransitionType) of
@@ -214,12 +207,54 @@ check_transitions([T|TS], InteractionType, Message, FSMState, Monitor) ->
          if CanTakeTransition -> {ok, T, Monitor, false};
             not CanTakeTransition ->
               % Right transition type, wrong parameters
-              check_transitions(TS, InteractionType, Message, FSMState, Monitor)
+              check_transitions(TS, Action, FSMState, Monitor)
          end;
      true ->
        % Transition is of the wrong type
-       check_transitions(TS, InteractionType, Message, FSMState, Monitor)
+       check_transitions(TS, Action, FSMState, Monitor)
+  end;
+check_transitions([T|TS], Action={subsession_action, SubsessionAction}, FSMState, Monitor) ->
+  TransitionType = element(1, T),
+  SubsessionActionType = element(1, SubsessionAction),
+  if SubsessionActionType == TransitionType ->
+       case SubsessionAction of
+         {start_subsession, SubsessionName, InternalInvites, ExternalInvites} ->
+           CheckStartRes =
+             check_start_subsession(T, SubsessionName, InternalInvites, ExternalInvites),
+           if CheckStartRes ->
+                {ok, T, Monitor, false};
+              not CheckStartRes ->
+                check_transitions(TS, Action, FSMState, Monitor)
+           end;
+         {subsession_success} -> {ok, T, Monitor, false};
+         {subsession_failure, FailureName} ->
+           TransitionFailureName = element(3, T),
+           if FailureName == TransitionFailureName ->
+                {ok, T, Monitor, false};
+              FailureName =/= TransitionFailureName ->
+                % Wrong handle block
+                check_transitions(TS, Action, FSMState, Monitor)
+           end
+       end;
+     SubsessionActionType =/= TransitionType ->
+       % Wrong transition type
+       check_transitions(TS, Action, FSMState, Monitor)
   end.
+
+
+check_start_subsession({start_subsession, _, TSubsessionName, TExternal, TInternal},
+                       SubsessionName, Internal, External) ->
+  InternalRes = check_lists(TInternal, Internal),
+  % Forwards-compatibility here -- allowing both {Name, PID} and Name
+  ExternalList = lists:map(fun(X) -> case X of {Name, _} -> Name;
+                                               Name -> Name
+                                     end end, External),
+  ExternalRes = check_lists(TExternal, ExternalList),
+  NameRes = (TSubsessionName == SubsessionName),
+  NameRes andalso InternalRes andalso ExternalRes.
+
+check_lists(TList, List) ->
+  lists:sort(TList) == lists:sort(List).
 
 delete_monitor_instances(FSMIDs, MonitorInstance) ->
   MonitorInstanceDict = MonitorInstance#outer_monitor_instance.monitor_instances,
@@ -257,10 +292,9 @@ update_monitor(FSM, MonitorInstance) ->
   MonitorInstances1 = orddict:store(FSMID, FSM, MonitorInstances),
   MonitorInstance#outer_monitor_instance{monitor_instances=MonitorInstances1}.
 
-get_next_state(InteractionType, Message, FSM, MonitorInstance) ->
+get_next_state(Action, FSM, MonitorInstance) ->
   Transitions = get_transitions(FSM),
-% ok, NextStateID, NewMonitorInstance, bool
-  TransitionRes = check_transitions(Transitions, InteractionType, Message,
+  TransitionRes = check_transitions(Transitions, Action,
                                     FSM, MonitorInstance),
   case TransitionRes of
     {ok, Transition, NewMonitorInstance, IsNestedTransition} ->
@@ -286,11 +320,11 @@ is_on_par_node(FSM, MonitorInstance) ->
   end.
 
 
-% Checks to see whether the given message is accepted by the FSM
+% Checks to see whether the given action is accepted by the FSM
 % with the given ID.
-check_message_in(InteractionType, Message, FSMID, MonitorInstance) ->
+check_action_in(Action, FSMID, MonitorInstance) ->
   FSM = get_fsm(FSMID, MonitorInstance),
-  MonitorRes = get_next_state(InteractionType, Message, FSM, MonitorInstance),
+  MonitorRes = get_next_state(Action, FSM, MonitorInstance),
   case MonitorRes of
     {ok, Transition, MonitorInstance1, IsNestedTransition} ->
       MonitorInstance2 = make_transition(FSM, Transition, IsNestedTransition, MonitorInstance1),
@@ -298,33 +332,48 @@ check_message_in(InteractionType, Message, FSMID, MonitorInstance) ->
     Other -> Other
   end.
 
-check_message(InteractionType, Message, MonitorInstance) ->
+check_action(Action, MonitorInstance) ->
   % Check from the root FSM.
-  check_message_in(InteractionType, Message, 0, MonitorInstance).
+  check_action_in(Action, 0, MonitorInstance).
 
 %%%%%%%
 %%% API
 %%%%%%%
 
+% Action:
+  % {subsession_action, {start, session name, internal invites, external invites}}
+  % {subsession_action, {success}}
+  % {subsession_action, {failure, failure name}}
+  % {message, {interaction type, message}}
 
 % Checks whether a given message can be sent, given the current monitor state,
 % and advance the monitor state
 send(Message, MonitorInstance) ->
-  check_message(send, Message, MonitorInstance).
+  check_action({message, {send, Message}}, MonitorInstance).
 
 % Checks whether a given message can be received, given the current monitor state,
 % and advance the monitor state
 recv(Message, MonitorInstance) ->
-  check_message(recv, Message, MonitorInstance).
+  check_action({message, {recv, Message}}, MonitorInstance).
 
 send_call_request(Message, MonitorInstance) ->
-  check_message(send_call_req, Message, MonitorInstance).
+  check_action({message, {send_call_req, Message}}, MonitorInstance).
 recv_call_request(Message, MonitorInstance) ->
-  check_message(recv_call_req, Message, MonitorInstance).
+  check_action({message, {recv_call_req, Message}}, MonitorInstance).
 send_call_response(Message, MonitorInstance) ->
-  check_message(send_call_resp, Message, MonitorInstance).
+  check_action({message, {send_call_resp, Message}}, MonitorInstance).
 recv_call_response(Message, MonitorInstance) ->
-  check_message(recv_call_resp, Message, MonitorInstance).
+  check_action({message, {recv_call_resp, Message}}, MonitorInstance).
 
+start_subsession(SubsessionName, InternalInvitations,
+                 ExternalInvitations, MonitorInstance) ->
+  check_action({subsession_action, {start_subsession, SubsessionName,
+                                    InternalInvitations,
+                                    ExternalInvitations}}, MonitorInstance).
 
+subsession_success(MonitorInstance) ->
+  check_action({subsession_action, {start_subsession}}, MonitorInstance).
 
+subsession_failure(FailureName, MonitorInstance) ->
+  check_action({subsession_action, {subsession_failure, FailureName}},
+              MonitorInstance).
