@@ -161,23 +161,23 @@ handle_subsession_setup_failure(SubsessionName, ProtocolName, RoleName,
     Module:handle_subsession_setup_failed(SubsessionName, Reason, UserState, ConvKey),
   {noreply, State#actor_state{user_state=NewUserState}}.
 
-handle_subsession_success(SubsessionName, SubsessionResult, ProtocolName, RoleName, ConvID, State) ->
+handle_subsession_success(SubsessionName, ProtocolName, RoleName, ConvID, SubsessionResult, State) ->
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
   MonitorPID = State#actor_state.monitor_pid,
   ConvKey = make_conv_key(ProtocolName, RoleName, ConvID, MonitorPID),
   {ok, NewUserState} =
-    Module:handle_subsession_success(SubsessionName, SubsessionResult, UserState, ConvKey),
+    Module:ssactor_subsession_complete(SubsessionName, SubsessionResult, UserState, ConvKey),
   {noreply, State#actor_state{user_state=NewUserState}}.
 
-handle_subsession_failure(SubsessionName, FailureName, ProtocolName,
-                          RoleName, ConvID, State) ->
+handle_subsession_failure(SubsessionName, ProtocolName,
+                          RoleName, ConvID, FailureName, State) ->
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
   MonitorPID = State#actor_state.monitor_pid,
   ConvKey = make_conv_key(ProtocolName, RoleName, ConvID, MonitorPID),
   {ok, NewUserState} =
-    Module:handle_subsession_failure(SubsessionName, FailureName, UserState, ConvKey),
+    Module:ssactor_subsession_failed(SubsessionName, FailureName, UserState, ConvKey),
   {noreply, State#actor_state{user_state=NewUserState}}.
 
 % Handle incoming user messages. These have been checked by the monitor to
@@ -261,14 +261,14 @@ handle_cast({ssa_subsession_setup_failure, SubsessionName, ProtocolName, RoleNam
              ConvID, Reason}, State) ->
   handle_subsession_setup_failure(SubsessionName, ProtocolName, RoleName,
                                   ConvID, Reason, State);
-handle_cast({ssa_subsession_failure, SubsessionName, FailureName, ProtocolName,
-             RoleName, ConvID}, State) ->
-  handle_subsession_failure(SubsessionName, FailureName, ProtocolName,
-                            RoleName, ConvID, State);
-handle_cast({ssa_subsession_success, SubsessionName, Result, ProtocolName,
-             RoleName, ConvID}, State) ->
-  handle_subsession_success(SubsessionName, Result, ProtocolName, RoleName,
-                            ConvID, State);
+handle_cast({ssa_subsession_failure, SubsessionName, ProtocolName,
+             RoleName, ConvID, FailureName}, State) ->
+  handle_subsession_failure(SubsessionName, ProtocolName,
+                            RoleName, ConvID, FailureName, State);
+handle_cast({ssa_subsession_success, SubsessionName, ProtocolName,
+             RoleName, ConvID, Result}, State) ->
+  handle_subsession_success(SubsessionName, ProtocolName, RoleName,
+                            ConvID, Result, State);
 handle_cast(Msg, State) ->
   delegate_async(handle_cast, Msg, State).
 
@@ -311,14 +311,14 @@ subsession_setup_failure(ActorPID, SubsessionName, ProtocolName, RoleName, ConvI
   gen_server2:cast(ActorPID, {ssa_subsession_setup_failure, SubsessionName,
                               ProtocolName, RoleName, ConvID, Reason}).
 
-subsession_failure(ActorPID, SubsessionName, FailureName, ProtocolName, RoleName, ConvID) ->
-  gen_server2:cast(ActorPID, {ssa_subsession_failure, SubsessionName, FailureName,
-                              ProtocolName, RoleName, ConvID}).
+subsession_failure(ActorPID, SubsessionName, ProtocolName, RoleName, ConvID, FailureName) ->
+  gen_server2:cast(ActorPID, {ssa_subsession_failure, SubsessionName,
+                              ProtocolName, RoleName, ConvID, FailureName}).
 
-subsession_success(ActorPID, SubsessionName, SubsessionResult, ProtocolName,
-                   RoleName, ConvID) ->
+subsession_success(ActorPID, SubsessionName, ProtocolName,
+                   RoleName, ConvID, SubsessionResult) ->
   gen_server2:cast(ActorPID, {ssa_subsession_success, SubsessionName,
-                              SubsessionResult, ProtocolName, RoleName, ConvID}).
+                              ProtocolName, RoleName, ConvID, SubsessionResult}).
 
 
 

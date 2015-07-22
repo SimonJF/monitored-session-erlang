@@ -71,7 +71,7 @@ check_conversation_setup_complete(State) ->
   % If it is complete, broadcast the conv setup complete message
   if not AlreadySetup andalso SetupComplete ->
       broadcast_conv_setup(State),
-      notify_subsession_established(State),
+      % notify_subsession_established(State),
       State#conv_inst_state{setup_complete_broadcast=true};
     true -> State
   end.
@@ -261,6 +261,9 @@ handle_subsession_end(EndType, Arg, State) ->
   InitiatorRN = SubsessionState#subsession_state.initiator_role,
   InitiatorCID = SubsessionState#subsession_state.parent_conv_id,
   if EndType == success ->
+       error_logger:info_msg("IN HSE CINST. GOD FUCKING HELP ME.~n SubsessionName: ~p~nSubsessionPID: ~p~nInitiatorPN: ~p~n
+                        InitiatorRN: ~p~n, InitiatorCID: ~p~n, Result: ~p~n",
+                        [SubsessionName, InitiatorPID, InitiatorPN, InitiatorRN, InitiatorCID, Arg]),
        actor_monitor:subsession_success(InitiatorPID, SubsessionName, InitiatorPN,
                                         InitiatorRN, InitiatorCID, Arg);
      EndType == failure ->

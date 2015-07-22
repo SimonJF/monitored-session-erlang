@@ -69,6 +69,7 @@ fresh_state(ActorTypeName, ProtocolRoleMap, FailureDetectionStrategy) ->
               routing_table=orddict:new(),
               queued_messages=orddict:new(),
               pending_calls=orddict:new(),
+              pending_subsessions=orddict:new(),
               failure_detection_strategy=FailureDetectionStrategy,
               participant_monitor_refs=orddict:new()
              }.
@@ -209,6 +210,9 @@ update_monitor(CID, Role, Monitor, State) ->
 handle_subsession_ended(success, SubsessionName, InitiatorPN, InitiatorRN,
                           InitiatorCID, Result, State) ->
   ActorPID = State#monitor_state.actor_pid,
+  Monitors = State#monitor_state.monitors,
+  error_logger:info_msg("HSE, SN: ~p,~nPN: ~p,~nRN: ~p,~nCID: ~p,~nRes: ~p,~nMonitors: ~p~n",
+                        [SubsessionName, InitiatorPN, InitiatorRN, InitiatorCID, Result, Monitors]),
   % Check against & advance the monitor
   Monitor = get_monitor(InitiatorCID, InitiatorRN, State),
   MonitorRes = monitor:subsession_success(Monitor),
@@ -656,7 +660,7 @@ handle_start_subsession(ConvKey, SubsessionName, InternalInvitations, ExternalIn
           % Start the subsession
           SubsessionProcRes = conversation_instance:start_subsession(SubsessionName, RoleSpecs,
                                                                      InitiatorCID, MonitorPID,
-                                                                     InitiatorRN),
+                                                                     InitiatorPN, InitiatorRN),
           case SubsessionProcRes of
             {ok, SubsessionPID} ->
               % Great, store old monitor instance, start invitations, and get on
@@ -665,7 +669,7 @@ handle_start_subsession(ConvKey, SubsessionName, InternalInvitations, ExternalIn
               %                                      {ConvKey, MonitorInstance}),
               NewPendingSubsessions = orddict:store(SubsessionPID, MonitorInstance, PendingSubsessions),
               Monitors = State#monitor_state.monitors,
-              NewMonitors = orddict:store({ConvKey, InitiatorRN}, NewMonitorInstance, Monitors),
+              NewMonitors = orddict:store({InitiatorCID, InitiatorRN}, NewMonitorInstance, Monitors),
               NewState = State#monitor_state{pending_subsessions=NewPendingSubsessions,
                                              monitors=NewMonitors},
               conversation_instance:start_subsession_invitations(SubsessionPID, InternalInvitations,
@@ -673,23 +677,24 @@ handle_start_subsession(ConvKey, SubsessionName, InternalInvitations, ExternalIn
               {noreply, NewState};
             % Couldn't start the subsesion process
             error ->
-              subsession_setup_failed(MonitorPID, SubsessionName,
+              subsession_setup_failed(MonitorPID, SubsessionName, undefined,
                                       InitiatorPN, InitiatorRN, InitiatorCID,
-                                      undefined, bad_subsesion_proc),
+                                      bad_subsesion_proc),
               {noreply, State}
           end;
         % Couldn't find RoleSpec: bad protocol
         _Err ->
-          subsession_setup_failed(MonitorPID, SubsessionName,
+          subsession_setup_failed(MonitorPID, SubsessionName, undefined,
                                   InitiatorPN, InitiatorRN, InitiatorCID,
-                                  undefined, bad_protocol),
+                                  bad_protocol),
           {noreply, State}
       end;
     % Monitor failed
     _Err ->
-      subsession_setup_failed(MonitorPID, SubsessionName,
+      subsession_setup_failed(MonitorPID, SubsessionName, undefined,
                               InitiatorPN, InitiatorRN, InitiatorCID,
-                              undefined, bad_action)
+                              bad_action),
+      {noreply, State}
   end.
 
 
@@ -911,6 +916,9 @@ incoming_call_response(MonitorPID, ProtocolName, RoleName, ConvID, Message, From
 
 subsession_setup_failed(MonitorPID, SubsessionName, SubsessionPID, InitiatorPN,
                         InitiatorRN, InitiatorCID, Reason) ->
+  error_logger:info_msg("Setup fail, SubsessionName: ~p~nSubsessionPID: ~p~nInitiatorPN: ~p~n\
+                        InitiatorRN: ~p~n, InitiatorCID: ~p~n, Reason: ~p~n",
+                        [SubsessionName, SubsessionPID, InitiatorPN, InitiatorRN, InitiatorCID, Reason]),
   gen_server2:cast(MonitorPID, {subsession_setup_failed, SubsessionName, SubsessionPID,
                                 InitiatorPN, InitiatorRN, InitiatorCID, Reason}).
 
