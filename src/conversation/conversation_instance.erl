@@ -205,6 +205,13 @@ handle_get_endpoints(RoleList, State) ->
   RoleMapping = State#conv_inst_state.role_mapping,
   lists:map(fun(Role) -> {Role, orddict:fetch(Role, RoleMapping)} end, RoleList).
 
+split_external_invitations([], Known, Unknown) ->
+  {Known, Unknown};
+split_external_invitations([X={_Role, _Endpoint}|XS], Known, Unknown) ->
+  split_external_invitations(XS, [X|Known], Unknown);
+split_external_invitations([X|XS], Known, Unknown) ->
+  split_external_invitations(XS, Known, [X|Unknown]).
+
 % InternalRoles : [Role]
 % ExternalInvitations : [{Role, Endpoint}]
 handle_send_subsession_invitations(InternalRoles, ExternalInvitations, State) ->
@@ -217,10 +224,17 @@ handle_send_subsession_invitations(InternalRoles, ExternalInvitations, State) ->
   ProtocolName = State#conv_inst_state.protocol_name,
 
   % Get the inhabitants of all internally-invited roles
-  InternalInvitations = conversation_instance:get_endpoints(ParentConvID, InternalRoles),
+  InternalInvitations = get_endpoints(ParentConvID, InternalRoles),
+
+  {KnownExternalEndpoints, UnknownExternalEndpoints} =
+    split_external_invitations(ExternalInvitations, [], []),
 
   % InternalInvitations, ExternalInvitations: [{Role, Endpoint}]
-  InvitationList = InternalInvitations ++ ExternalInvitations,
+  InvitationList = InternalInvitations ++ KnownExternalEndpoints,
+  UnknownExternalInviteRes =
+    protocol_registry:invite_subset(ProtocolName, self(),
+                                    UnknownExternalEndpoints),
+
   % Invite everything in the invitation list
   FailList = lists:foldr(fun({Role, Endpoint}, FailList) ->
                     try actor_monitor:incoming_invitation(Endpoint,
@@ -238,9 +252,12 @@ handle_send_subsession_invitations(InternalRoles, ExternalInvitations, State) ->
                         [Role|FailList]
                     end
               end, [], InvitationList),
-  if length(FailList) == 0 ->
+  error_logger:info_msg("Known external: ~p~nUnknown external: ~p~n UEIR: ~p~n",
+                        [KnownExternalEndpoints, UnknownExternalEndpoints,
+                         UnknownExternalInviteRes]),
+  if (length(FailList) == 0) andalso (UnknownExternalInviteRes == {ok, ok}) ->
        ok;
-     length(FailList) =/= 0 ->
+     true ->
        actor_monitor:subsession_setup_failed(InitiatorPID, ProtocolName, self(),
                                              InitiatorProtocol, InitiatorRole,
                                              ParentConvID, invitation_failed),

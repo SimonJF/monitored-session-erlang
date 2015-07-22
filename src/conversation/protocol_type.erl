@@ -51,6 +51,16 @@ is_role_transient_inner(RoleName, [X|XS]) ->
   end.
 
 
+invite_role_subset(ConversationID, RoleList, State) ->
+  Roles = orddict:to_list(State#protocol_state.role_specs),
+  FilteredRoles = lists:filtermap(fun({Role, _}) ->
+                                      ShouldInvite = lists:member(Role, RoleList),
+                                      if ShouldInvite -> {true, Role};
+                                         not ShouldInvite -> false
+                                      end end, Roles),
+  invite_actors_inner(FilteredRoles, ConversationID, State).
+
+
 % Invite actor instances to partake in a conversation, given the conversation
 % ID and the role mapping.
 invite_actors(ConversationID, InitiatorRole, InitiatorPID, State) ->
@@ -142,6 +152,9 @@ handle_call(get_monitors, _From, State) ->
   {reply, State#protocol_state.monitors, State};
 handle_call({delayed_invitation, InviteeMonitorPID, RoleName, ConversationID}, _From, State) ->
   handle_delayed_invite(InviteeMonitorPID, RoleName, ConversationID, State);
+handle_call({invite_subset, ConversationID, RoleList}, _, State) ->
+  Res = invite_role_subset(ConversationID, RoleList, State),
+  {reply, Res, State};
 handle_call(Other, _From, State) ->
   error_logger:warning_msg("WARN: Protocol process ~s received " ++
                            "unhandled synchronous messsage ~p.~n",
@@ -189,6 +202,9 @@ get_roles(ProtocolPID) ->
 begin_invitation(ProtocolPID, ConversationID, InitiatorRole, InitiatorPID) ->
   gen_server2:cast(ProtocolPID, {begin_invitation, ConversationID,
                    InitiatorRole, InitiatorPID}).
+
+invite_actor_subset(ProtocolPID, ConversationID, RoleList) ->
+  gen_server2:call(ProtocolPID, {invite_subset, ConversationID, RoleList}).
 
 get_monitor(ProtocolPID, RoleName) ->
   gen_server2:call(ProtocolPID, {get_monitor, RoleName}).

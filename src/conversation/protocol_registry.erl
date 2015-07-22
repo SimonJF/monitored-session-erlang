@@ -154,6 +154,13 @@ invite_actor_direct(ProtocolName, ConversationID, RoleName, InviteeMonitorPID) -
                      end,
   with_protocol_process(ProtocolName, InviteDirectFunc).
 
+invite_subset(ProtocolName, ConversationID, RoleList) ->
+  InviteSubsetFunc = fun (ProtocolPID) ->
+                         protocol_type:invite_actor_subset(ProtocolPID, ConversationID,
+                                                           RoleList)
+                     end,
+  with_protocol_process(ProtocolName, InviteSubsetFunc).
+
 start_link(Args) ->
   gen_server2:start_link({global, ?PROTOCOL_REGISTRY}, protocol_registry, Args, []).
 
