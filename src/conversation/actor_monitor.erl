@@ -211,8 +211,6 @@ handle_subsession_ended(success, SubsessionName, InitiatorPN, InitiatorRN,
                           InitiatorCID, Result, State) ->
   ActorPID = State#monitor_state.actor_pid,
   Monitors = State#monitor_state.monitors,
-  error_logger:info_msg("HSE, SN: ~p,~nPN: ~p,~nRN: ~p,~nCID: ~p,~nRes: ~p,~nMonitors: ~p~n",
-                        [SubsessionName, InitiatorPN, InitiatorRN, InitiatorCID, Result, Monitors]),
   % Check against & advance the monitor
   Monitor = get_monitor(InitiatorCID, InitiatorRN, State),
   MonitorRes = monitor:subsession_success(Monitor),
@@ -594,52 +592,6 @@ handle_check_role_reachable(ConvID, LocalRoleName, TargetRoleName, State) ->
   Monitor = orddict:fetch({ConvID, LocalRoleName}, Monitors),
   monitor:is_role_reachable(TargetRoleName, Monitor).
 
-% check_subsession_roles_filled(InternalInvitations, ExternalInvitations, ProtocolName) ->
-%   RoleRes = protocol_registry:get_roles(ProtocolName),
-%   InternalRoles = sets:from_list(InternalInvitations),
-%   ExternalRoles = sets:from_list(lists:map(fun({R, _E}) -> R end, ExternalInvitations)),
-%   case RoleRes of
-%     {ok, RoleSpecs} ->
-%       Roles = lists:map(fun({R, _}) -> R end, RoleSpecs),
-%       RoleSet = sets:from_list(Roles),
-%       InvitationSet = sets:union(InternalRoles, ExternalRoles),
-%       UnfilledRoles = sets:subtract(RoleSet, InvitationSet),
-%       UnfilledRolesSize = sets:size(UnfilledRoles),
-%       %io:format("Unfilled roles: ~p~n", [sets:to_list(UnfilledRoles)]),
-%       if UnfilledRolesSize == 0 ->
-%            {ok, RoleSpecs};
-%          true -> {error, {unfilled_roles, UnfilledRoles}}
-%       end;
-%     _Err -> {error, bad_protocol}
-%   end.
-
-% handle_start_subsession(ProtocolName, InternalInvitations, ExternalInvitations,
-%                         ParentConvID, InitiatorRole, State) ->
-%   MonitorPID = self(),
-%   % TODO: Check against the monitor
-%   % Alright. First, we need to ensure that InternalInvitations U ExternalInvitations = Roles
-%   error_logger:info_msg("Starting subsession ~p~n", [ProtocolName]),
-%   case check_subsession_roles_filled(InternalInvitations, ExternalInvitations,
-%                                      ProtocolName) of
-%     {ok, RoleSpecs} ->
-%       % Now, we can start the conversation process for the subsession
-%       SubsessionProcRes = conversation_instance:start_subsession(ProtocolName, RoleSpecs, ParentConvID,
-%                                                                  MonitorPID, InitiatorRole),
-%       case SubsessionProcRes of
-%         {ok, SubsessionPID} ->
-%           conversation_instance:start_subsession_invitations(SubsessionPID, InternalInvitations,
-%                                                              ExternalInvitations),
-%           {noreply, State};
-%         error ->
-%           {noreply, State}
-%           %{{error, bad_subsession_proc}, State}
-%       end;
-%     Err ->
-%       % TODO: Report this error!
-%       {noreply, State}
-%       % {noreply, Err, State}
-%   end.
-
 % {ProtocolName, RoleName, ConversationID, MonitorPID},
 % TRIANGLE OF DOOOOOOOOOOOOOOOOOOOM
 % I miss monads so much
@@ -916,9 +868,6 @@ incoming_call_response(MonitorPID, ProtocolName, RoleName, ConvID, Message, From
 
 subsession_setup_failed(MonitorPID, SubsessionName, SubsessionPID, InitiatorPN,
                         InitiatorRN, InitiatorCID, Reason) ->
-  error_logger:info_msg("Setup fail, SubsessionName: ~p~nSubsessionPID: ~p~nInitiatorPN: ~p~n\
-                        InitiatorRN: ~p~n, InitiatorCID: ~p~n, Reason: ~p~n",
-                        [SubsessionName, SubsessionPID, InitiatorPN, InitiatorRN, InitiatorCID, Reason]),
   gen_server2:cast(MonitorPID, {subsession_setup_failed, SubsessionName, SubsessionPID,
                                 InitiatorPN, InitiatorRN, InitiatorCID, Reason}).
 
