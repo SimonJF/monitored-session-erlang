@@ -35,10 +35,12 @@ behaviour_info(callbacks) ->
      {ssactor_join,4},
      {ssactor_handle_message, 7},
      {ssactor_become, 5},
-     {ssactor_join, 4},
      {ssactor_conversation_established, 5},
      {ssactor_conversation_error, 4},
      {ssactor_conversation_ended, 3},
+     {ssactor_subsession_complete, 4}, % Name, Result, State, ConvKey
+     {ssactor_subsession_failed, 4}, % Name, FailureName, State, ConvKey
+     {ssactor_subsession_setup_failed, 4},
      {handle_call, 3},
      {handle_cast, 3},
      {handle_info, 3},
@@ -80,7 +82,6 @@ init([Module, UserArgs, MonitorPID]) ->
 % and termination messages to the actor.
 
 delegate_async(Fun, Msg, State) ->
-  %io:format("Delegating: ~p~n", [Msg]),
   Module = State#actor_state.actor_type_name,
   UserState = State#actor_state.user_state,
   UserResult = case Fun of
@@ -146,6 +147,38 @@ handle_call(Request, From, State) ->
       NewState = update_user_state(State, NewUserState),
       {stop, Reason, NewState}
   end.
+
+make_conv_key(Protocol, Role, ConvID, MonitorID) ->
+  {Protocol, Role, ConvID, MonitorID}.
+
+handle_subsession_setup_failure(SubsessionName, ProtocolName, RoleName,
+                                ConvID, Reason, State) ->
+  Module = State#actor_state.actor_type_name,
+  UserState = State#actor_state.user_state,
+  MonitorPID = State#actor_state.monitor_pid,
+  ConvKey = make_conv_key(ProtocolName, RoleName, ConvID, MonitorPID),
+  {ok, NewUserState} =
+    Module:handle_subsession_setup_failed(SubsessionName, Reason, UserState, ConvKey),
+  {noreply, State#actor_state{user_state=NewUserState}}.
+
+handle_subsession_success(SubsessionName, SubsessionResult, ProtocolName, RoleName, ConvID, State) ->
+  Module = State#actor_state.actor_type_name,
+  UserState = State#actor_state.user_state,
+  MonitorPID = State#actor_state.monitor_pid,
+  ConvKey = make_conv_key(ProtocolName, RoleName, ConvID, MonitorPID),
+  {ok, NewUserState} =
+    Module:handle_subsession_success(SubsessionName, SubsessionResult, UserState, ConvKey),
+  {noreply, State#actor_state{user_state=NewUserState}}.
+
+handle_subsession_failure(SubsessionName, FailureName, ProtocolName,
+                          RoleName, ConvID, State) ->
+  Module = State#actor_state.actor_type_name,
+  UserState = State#actor_state.user_state,
+  MonitorPID = State#actor_state.monitor_pid,
+  ConvKey = make_conv_key(ProtocolName, RoleName, ConvID, MonitorPID),
+  {ok, NewUserState} =
+    Module:handle_subsession_failure(SubsessionName, FailureName, UserState, ConvKey),
+  {noreply, State#actor_state{user_state=NewUserState}}.
 
 % Handle incoming user messages. These have been checked by the monitor to
 % ensure that they conform to the MPST.
@@ -224,6 +257,18 @@ handle_cast({ssa_call_req, MonitorPID, ProtocolName, RoleName, ConversationID,
         exit(wrong_return_value)
     end,
   {noreply, State#actor_state{user_state=NewUserState}};
+handle_cast({ssa_subsession_setup_failure, SubsessionName, ProtocolName, RoleName,
+             ConvID, Reason}, State) ->
+  handle_subsession_setup_failure(SubsessionName, ProtocolName, RoleName,
+                                  ConvID, Reason, State);
+handle_cast({ssa_subsession_failure, SubsessionName, FailureName, ProtocolName,
+             RoleName, ConvID}, State) ->
+  handle_subsession_failure(SubsessionName, FailureName, ProtocolName,
+                            RoleName, ConvID, State);
+handle_cast({ssa_subsession_success, SubsessionName, Result, ProtocolName,
+             RoleName, ConvID}, State) ->
+  handle_subsession_success(SubsessionName, Result, ProtocolName, RoleName,
+                            ConvID, State);
 handle_cast(Msg, State) ->
   delegate_async(handle_cast, Msg, State).
 
@@ -241,7 +286,6 @@ terminate(Reason, State) ->
   Module = State#actor_state.actor_type_name,
   MonitorPID = State#actor_state.monitor_pid,
   UserState = State#actor_state.user_state,
-  %exit(MonitorPID, kill),
   actor_type_registry:deregister_actor_instance(Module, MonitorPID),
   Module:terminate(Reason, UserState),
   ok.
@@ -262,6 +306,21 @@ join_conversation_request(ActorPID, ProtocolName, RoleName, ConvID) ->
   %io:format("JCR: Actor: ~p, PN: ~p, RN: ~p, CID: ~p~n",
   %          [ActorPID, ProtocolName, RoleName, ConvID]),
   gen_server2:call(ActorPID, {ssa_join_conversation, ProtocolName, RoleName, ConvID}).
+
+subsession_setup_failure(ActorPID, SubsessionName, ProtocolName, RoleName, ConvID, Reason) ->
+  gen_server2:cast(ActorPID, {ssa_subsession_setup_failure, SubsessionName,
+                              ProtocolName, RoleName, ConvID, Reason}).
+
+subsession_failure(ActorPID, SubsessionName, FailureName, ProtocolName, RoleName, ConvID) ->
+  gen_server2:cast(ActorPID, {ssa_subsession_failure, SubsessionName, FailureName,
+                              ProtocolName, RoleName, ConvID}).
+
+subsession_success(ActorPID, SubsessionName, SubsessionResult, ProtocolName,
+                   RoleName, ConvID) ->
+  gen_server2:cast(ActorPID, {ssa_subsession_success, SubsessionName,
+                              SubsessionResult, ProtocolName, RoleName, ConvID}).
+
+
 
 %%%%%%%%%%%%%
 %%%% API %%%%

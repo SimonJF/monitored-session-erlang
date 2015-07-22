@@ -77,9 +77,21 @@ unset_conv_property({_, _, ConvID, _}, Key) ->
 get_conv_property({_, _, ConvID, _}, Key) ->
   conversation_instance:get_property(ConvID, Key).
 
-subsession(ConvKey, ProtocolName, InternalInvitations, ExternalInvitations) ->
-  % TODO: Proper error reporting
-  actor_monitor:start_subsession(ConvKey, ProtocolName, InternalInvitations, ExternalInvitations).
-
 end_conversation({_, _, ConvID, _}, Reason) ->
   conversation_instance:end_conversation(ConvID, Reason).
+
+
+% Start a new subsession
+start_subsession(ConvKey, ProtocolName, InternalInvitations, ExternalInvitations) ->
+  actor_monitor:start_subsession(ConvKey, ProtocolName,
+                                 InternalInvitations, ExternalInvitations).
+
+% Subsession completed successfully
+subsession_complete(ConvKey, Result) ->
+  {_, _, CID, _} = ConvKey,
+  conversation_instance:subsession_complete(CID, Result).
+
+% An application logic exception occurred.
+subsession_failed(ConvKey, FailureName) ->
+  {_, _, CID, _} = ConvKey,
+  conversation_instance:subsession_complete(CID, FailureName).

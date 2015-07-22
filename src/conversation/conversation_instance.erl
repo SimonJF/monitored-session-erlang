@@ -3,6 +3,7 @@
 -behaviour(gen_server2).
 
 -record(subsession_state, {initiator_pid,
+                           initiator_protocol,
                            initiator_role,
                            parent_conv_id}).
 
@@ -17,8 +18,6 @@
                                                      %% used in push-based FD
 
                           conv_properties,           %% Per-conv properties.
-
-                          failure_handler_function,  %% Failure handling function
 
                           subsession_state           %% Extra info if this is a
                                                      %% subsession
@@ -142,32 +141,24 @@ fresh_state(ProtocolName, RoleSpecs) ->
                    subsession_state=undefined
                   }.
 
-fresh_state(ProtocolName, RoleSpecs, FailureHandlingFn) ->
+fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorProtocol, InitiatorRole) ->
   State = fresh_state(ProtocolName, RoleSpecs),
-  State#conv_inst_state{failure_handler_function=FailureHandlingFn}.
-
-fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole, FailureHandlingFn) ->
-  State = fresh_state(ProtocolName, RoleSpecs, FailureHandlingFn),
-  SubsessionState = #subsession_state{initiator_pid=InitiatorPID, initiator_role=InitiatorRole,
+  SubsessionState = #subsession_state{initiator_pid=InitiatorPID,
+                                      initiator_protocol=InitiatorProtocol,
+                                      initiator_role=InitiatorRole,
                                       parent_conv_id=ParentConvID},
   State#conv_inst_state{subsession_state=SubsessionState}.
 
-handle_end_conversation(Reason, State) ->
+broadcast_end_notification(Reason, State) ->
   % Only send one notification per actor.
   RoleMappingList = orddict:to_list(State#conv_inst_state.role_mapping),
   PIDs = lists:map(fun({_, Pid}) -> Pid end, RoleMappingList),
   UniqList = sets:to_list(sets:from_list(PIDs)),
   lists:foreach(fun(Pid) -> actor_monitor:conversation_ended(Pid, self(), Reason) end,
-                UniqList),
+                UniqList).
 
-  % Now that all actors have been notified, invoke failure handler
-  % to do any necessary rollbacks / compensation
-  FailureHandlerFn = State#conv_inst_state.failure_handler_function,
-  if Reason =/= normal ->
-       invoke_failure_handler(Reason, State, FailureHandlerFn);
-     Reason == normal ->
-       ok
-  end,
+handle_end_conversation(Reason, State) ->
+  broadcast_end_notification(Reason, State),
   exit(normal),
   {noreply, State}.
 
@@ -184,19 +175,6 @@ get_role_alive_status_inner([{R, E}|XS], {Alive, Dead}) ->
      not ActorAlive ->
        get_role_alive_status_inner(XS, {Alive, [R|Dead]})
   end.
-
-
-invoke_failure_handler(Reason, State, FailureHandlerFn) ->
-  % Get list of alive / dead roles
-  RoleMapping = State#conv_inst_state.role_mapping,
-  RoleMappingList = orddict:to_list(RoleMapping),
-  {AliveRoles, DeadRoles} = get_role_alive_status(RoleMappingList),
-
-  % Get properties, invoke failure handler
-  ConvProperties = State#conv_inst_state.conv_properties,
-  failure_handler:start_failure_handler(self(), AliveRoles, DeadRoles,
-                                        ConvProperties, Reason, FailureHandlerFn),
-  ok.
 
 handle_begin_continuation_safety_check(MonitorRef, State) ->
   RoleMapping = State#conv_inst_state.role_mapping,
@@ -233,15 +211,16 @@ handle_send_subsession_invitations(InternalRoles, ExternalInvitations, State) ->
   % Load everything we need from the state
   SubsessionState = State#conv_inst_state.subsession_state,
   InitiatorPID = SubsessionState#subsession_state.initiator_pid,
+  InitiatorProtocol = SubsessionState#subsession_state.initiator_protocol,
   InitiatorRole = SubsessionState#subsession_state.initiator_role,
   ParentConvID = SubsessionState#subsession_state.parent_conv_id,
+  ProtocolName = State#conv_inst_state.protocol_name,
 
   % Get the inhabitants of all internally-invited roles
   InternalInvitations = conversation_instance:get_endpoints(ParentConvID, InternalRoles),
 
   % InternalInvitations, ExternalInvitations: [{Role, Endpoint}]
   InvitationList = InternalInvitations ++ ExternalInvitations,
-  ProtocolName = State#conv_inst_state.protocol_name,
   % Invite everything in the invitation list
   FailList = lists:foldr(fun({Role, Endpoint}, FailList) ->
                     try actor_monitor:incoming_invitation(Endpoint,
@@ -261,15 +240,42 @@ handle_send_subsession_invitations(InternalRoles, ExternalInvitations, State) ->
               end, [], InvitationList),
   if length(FailList) == 0 ->
        ok;
-     true ->
-       if InitiatorPID =/= undefined ->
-            actor_monitor:subsession_establish_error(InitiatorPID, ParentConvID, InitiatorRole, self());
-          InitiatorPID == undefined ->
-            % TODO: Notify failure handler function of session failure.
-            ok
-       end,
+     length(FailList) =/= 0 ->
+       actor_monitor:subsession_setup_failed(InitiatorPID, ProtocolName, self(),
+                                             InitiatorProtocol, InitiatorRole,
+                                             ParentConvID, invitation_failed),
        end_conversation(self(), invitation_failed)
   end.
+
+get_subsession_state(State) ->
+  State#conv_inst_state.subsession_state.
+
+handle_subsession_end(EndType, Arg, State) ->
+% Broadcast session end message to all participants
+  broadcast_end_notification(normal, State),
+  % Send "subsession complete" notification to initiator
+  SubsessionState = get_subsession_state(State),
+  SubsessionName = State#conv_inst_state.protocol_name,
+  InitiatorPID = SubsessionState#subsession_state.initiator_pid,
+  InitiatorPN = SubsessionState#subsession_state.initiator_protocol,
+  InitiatorRN = SubsessionState#subsession_state.initiator_role,
+  InitiatorCID = SubsessionState#subsession_state.parent_conv_id,
+  if EndType == success ->
+       actor_monitor:subsession_success(InitiatorPID, SubsessionName, InitiatorPN,
+                                        InitiatorRN, InitiatorCID, Arg);
+     EndType == failure ->
+       actor_monitor:subsession_failure(InitiatorPID, SubsessionName, InitiatorPN,
+                                        InitiatorRN, InitiatorCID, Arg)
+  end,
+  exit(normal),
+  {noreply, State}.
+
+
+handle_subsession_complete(Result, State) ->
+  handle_subsession_end(success, Result, State).
+
+handle_subsession_failed(Error, State) ->
+  handle_subsession_end(failure, Error, State).
 
 handle_get_property(Key, State) ->
   ConvProperties = State#conv_inst_state.conv_properties,
@@ -286,17 +292,15 @@ handle_unset_property(Key, State) ->
   State#conv_inst_state{conv_properties=NewConvProperties}.
 
 % Callbacks...
+% Standard session
 init([ProtocolName, RoleSpecs]) ->
   process_flag(trap_exit, true),
-  {ok, fresh_state(ProtocolName, RoleSpecs, undefined)};
-init([ProtocolName, RoleSpecs, FailureHandlerFn]) ->
-  {ok, fresh_state(ProtocolName, RoleSpecs, FailureHandlerFn)};
-init([ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole]) ->
+  {ok, fresh_state(ProtocolName, RoleSpecs)};
+% Subsession
+init([ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorProtocol, InitiatorRole]) ->
   process_flag(trap_exit, true),
-  {ok, fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole, undefined)};
-init([ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole, FailureHandlerFn]) ->
-  process_flag(trap_exit, true),
-  {ok, fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole, FailureHandlerFn)}.
+  {ok, fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID,
+                   InitiatorProtocol, InitiatorRole)}.
 
 handle_call({get_endpoints, RoleList}, _, State) ->
   Res = handle_get_endpoints(RoleList, State),
@@ -326,6 +330,10 @@ handle_cast({start_subsession_invitations, InternalInvitations,
              ExternalInvitations}, State) ->
   handle_send_subsession_invitations(InternalInvitations, ExternalInvitations, State),
   {noreply, State};
+handle_cast({subsession_complete, Result}, State) ->
+  handle_subsession_complete(Result, State);
+handle_cast({subsession_failed, Reason}, State) ->
+  handle_subsession_failed(Reason, State);
 handle_cast(Other, State) ->
   conversation_warn("Unhandled async message ~w.", [Other], State),
   {noreply, State}.
@@ -353,13 +361,9 @@ start(ProtocolName, RoleSpecs, FailureHandlerFn) ->
 end_conversation(ConvID, Reason) ->
   gen_server2:cast(ConvID, {end_conversation, Reason}).
 
-start_subsession(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole) ->
+start_subsession(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorProtocol, InitiatorRole) ->
   gen_server2:start(conversation_instance, [ProtocolName, RoleSpecs, ParentConvID,
-                                            InitiatorPID, InitiatorRole], []).
-
-start_subsession(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorRole, FailureHandlingFn) ->
-  gen_server2:start(conversation_instance, [ProtocolName, RoleSpecs, ParentConvID,
-                                            InitiatorPID, InitiatorRole, FailureHandlingFn], []).
+                                            InitiatorPID, InitiatorProtocol, InitiatorRole], []).
 
 
 start_subsession_invitations(SubsessionID, InternalInvitations, ExternalInvitations) ->
@@ -382,5 +386,9 @@ set_property(ConvID, Key, Value) ->
 unset_property(ConvID, Key) ->
   gen_server2:call(ConvID, {unset_property, Key}).
 
-%begin_continuation_safety_check(ConvID, RoleName) ->
-%  gen_server2:cast(ConvID, {begin_continuation_safety_check, RoleName}).
+subsession_complete(ConvID, Result) ->
+  gen_server2:cast(ConvID, {subsession_complete, Result}).
+
+subsession_failed(ConvID, Reason) ->
+  gen_server2:cast(ConvID, {subsession_failed, Reason}).
+
