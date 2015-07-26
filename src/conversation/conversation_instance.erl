@@ -5,7 +5,9 @@
 -record(subsession_state, {initiator_pid,
                            initiator_protocol,
                            initiator_role,
-                           parent_conv_id}).
+                           parent_conv_id,
+                           root_conv_id
+                          }).
 
 -record(conv_inst_state, {protocol_name,             %% Name of the protocol
 
@@ -71,23 +73,9 @@ check_conversation_setup_complete(State) ->
   % If it is complete, broadcast the conv setup complete message
   if not AlreadySetup andalso SetupComplete ->
       broadcast_conv_setup(State),
-      % notify_subsession_established(State),
       State#conv_inst_state{setup_complete_broadcast=true};
     true -> State
   end.
-
-
-notify_subsession_established(State) ->
-  SubsessionState = State#conv_inst_state.subsession_state,
-  if SubsessionState =/= undefined ->
-       InitiatorPID = SubsessionState#subsession_state.initiator_pid,
-       InitiatorRole = SubsessionState#subsession_state.initiator_role,
-       ParentConvID = SubsessionState#subsession_state.parent_conv_id,
-       actor_monitor:subsession_established(InitiatorPID, ParentConvID, InitiatorRole, self());
-     true ->
-       ok
-  end.
-
 
 
 broadcast_conv_setup(State) ->
@@ -116,8 +104,8 @@ register_participant(RoleName, Sender, State) ->
   % fulfilled, notifying actors if so
   NewState1 = check_conversation_setup_complete(NewState),
   % TODO: Only do this if push-based
-  %NewState2 = erlang_monitor_participant(RoleName, Sender, NewState1),
-  {noreply, NewState1}.
+  NewState2 = erlang_monitor_participant(RoleName, Sender, NewState1),
+  {noreply, NewState2}.
 
 % Checks whether the role is transient in the rolespec or not.
 % Initial val is not_filled if it isn't, and not_filled_transient if it is.
@@ -142,11 +130,14 @@ fresh_state(ProtocolName, RoleSpecs) ->
                   }.
 
 fresh_state(ProtocolName, RoleSpecs, ParentConvID, InitiatorPID, InitiatorProtocol, InitiatorRole) ->
+  RootPID = conversation_instance:get_root_pid(ParentConvID),
   State = fresh_state(ProtocolName, RoleSpecs),
   SubsessionState = #subsession_state{initiator_pid=InitiatorPID,
                                       initiator_protocol=InitiatorProtocol,
                                       initiator_role=InitiatorRole,
-                                      parent_conv_id=ParentConvID},
+                                      parent_conv_id=ParentConvID,
+                                      root_conv_id=RootPID
+                                     },
   State#conv_inst_state{subsession_state=SubsessionState}.
 
 broadcast_end_notification(Reason, State) ->
@@ -156,6 +147,15 @@ broadcast_end_notification(Reason, State) ->
   UniqList = sets:to_list(sets:from_list(PIDs)),
   lists:foreach(fun(Pid) -> actor_monitor:conversation_ended(Pid, self(), Reason) end,
                 UniqList).
+
+handle_get_root_pid(State) ->
+  SubsessionState = State#conv_inst_state.subsession_state,
+  if SubsessionState =/= undefined ->
+       SubsessionState#subsession_state.root_conv_id;
+     SubsessionState == undefined ->
+       % This is the root
+       self()
+  end.
 
 handle_end_conversation(Reason, State) ->
   broadcast_end_notification(Reason, State),
@@ -331,7 +331,9 @@ handle_call({set_property, Key, Value}, _, State) ->
 handle_call({unset_property, Key}, _, State) ->
   NewState = handle_unset_property(Key, State),
   {reply, ok, NewState};
-
+handle_call(get_root_pid, _, State) ->
+  Res = handle_get_root_pid(State),
+  {reply, Res, State};
 handle_call(Other, Sender, State) ->
   conversation_warn("Unhandled sync message ~w from ~p", [Other, Sender], State),
   {noreply, State}.
@@ -390,7 +392,6 @@ start_subsession_invitations(SubsessionID, InternalInvitations, ExternalInvitati
 accept_invitation(ConversationID, RoleName, ProcessID) ->
   gen_server2:cast(ConversationID, {accept_invitation, RoleName, ProcessID}).
 
-
 get_endpoints(ConvID, RoleList) ->
   gen_server2:call(ConvID, {get_endpoints, RoleList}).
 
@@ -402,6 +403,9 @@ set_property(ConvID, Key, Value) ->
 
 unset_property(ConvID, Key) ->
   gen_server2:call(ConvID, {unset_property, Key}).
+
+get_root_pid(ConvID) ->
+  gen_server2:call(ConvID, get_root_pid).
 
 subsession_complete(ConvID, Result) ->
   gen_server2:cast(ConvID, {subsession_complete, Result}).

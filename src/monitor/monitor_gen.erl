@@ -52,11 +52,11 @@ test_fsm(Filename) ->
                   io:format("AST: ~p~n", [AST]),
                   lists:foreach(fun (Mon) ->
                                 case Mon of
-                                  {ok, ProtocolName, {ok, OuterState}} ->
+                                  {ok, ProtocolName, {ok, Monitor}} ->
                                     io:format("Monitor for local protocol ~s:~n", [ProtocolName]),
-                                    print_fsms(OuterState);
+                                    print_fsms(Monitor),
                                     % print_fsm(States, Transitions),
-                                    %print_reachability(States, Transitions);
+                                    print_reachability(Monitor);
                                   {ok, ProtocolName, Error} ->
                                     io:format("Error generating monitor for local protocol ~s:~n~p~n",
                                               [ProtocolName, Error]);
@@ -69,6 +69,15 @@ test_fsm(Filename) ->
 
   end.
 
+print_reachability(Monitor) ->
+  io:format("Printing reachability...~n"),
+  MonitorInstance = monitor:create_monitor_instance("", "", Monitor),
+  ReachabilityDict = monitor:generate_reachability_dict(0, MonitorInstance),
+  ReachabilityDictList = orddict:to_list(ReachabilityDict),
+  lists:foreach(fun ({StateNum, Set}) ->
+                    List = sets:to_list(Set),
+                    io:format("~p: ~p~n", [StateNum, List]) end,
+                ReachabilityDictList).
 
 generate_module_monitors({module, _Name, _Imports, _Payloads, Protocols}) ->
   lists:map(fun (Protocol) ->

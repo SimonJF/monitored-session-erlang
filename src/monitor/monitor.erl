@@ -98,14 +98,16 @@ current_fsm_state_id(FSM) -> FSM#monitor_instance.current_state.
 get_fsm(FSMID, MonitorInstance) ->
   orddict:fetch(FSMID, MonitorInstance#outer_monitor_instance.monitor_instances).
 
-
-get_transitions(FSM) ->
-  CurrentState = FSM#monitor_instance.current_state,
+get_transitions_from(NodeID, FSM) ->
   TransitionTable = FSM#monitor_instance.transitions,
-  case orddict:find(CurrentState, TransitionTable) of
+  case orddict:find(NodeID, TransitionTable) of
     {ok, TransitionSet} -> sets:to_list(TransitionSet);
     _ -> []
   end.
+
+get_transitions(FSM) ->
+  CurrentState = FSM#monitor_instance.current_state,
+  get_transitions_from(CurrentState, FSM).
 
 check_receive(Message, RecvTransition)->
   {_, _, Sender, MessageName, _Payloads} = RecvTransition,
@@ -335,6 +337,140 @@ check_action_in(Action, FSMID, MonitorInstance) ->
 check_action(Action, MonitorInstance) ->
   % Check from the root FSM.
   check_action_in(Action, 0, MonitorInstance).
+
+
+%%%%%%%
+%%% Reachability Stuff
+%%%%%%%
+
+roles_involved({par_transition, _, _}) ->
+  %FIXME: We'll have to do something about this...
+  [];
+roles_involved({start_subsession_transition, _, _, IRs, _}) -> IRs;
+roles_involved({subsession_success, _}) -> [];
+roles_involved({subsession_failure, _}) -> [];
+roles_involved(T) ->
+  io:format("T = ~p~n", [T]),
+  InteractionType = element(1, T),
+  RoleRes = element(3, T),
+  IsList = (transition_kind(InteractionType) == send),
+  if IsList ->
+       RoleRes;
+     not IsList ->
+       [RoleRes]
+  end.
+
+
+add_transition_roles(T, FSM, Monitor, CurrentPathRoles, ReachableDict, VisitedSet) ->
+  TransitionRoles = sets:from_list(roles_involved(T)),
+  ToID = element(2, T),
+  NewCurrentPathRoles = sets:union(TransitionRoles, CurrentPathRoles),
+  {SubpathRoles, NewDict} =
+    reachable_from_inner(ToID, FSM, Monitor, NewCurrentPathRoles,
+                         ReachableDict, VisitedSet),
+  {sets:union(SubpathRoles, TransitionRoles), NewDict}.
+
+
+% NodeID: Current node ID
+% FSM: Current FSM
+% Monitor: Current monitor instance
+% CurrentReachableSet: Roles involved in this current path -- used if we revisit a node
+% ReachableDict: NodeID |-> [ReachableRole]
+% VisitedSet: Set of visited nodes
+reachable_from_inner(NodeID, FSM, Monitor, CurrentPathRoles, ReachableDict, VisitedSet) ->
+  % First: check whether the node has already been visited.
+  % If so, return the current reachable set.
+  case sets:is_element(NodeID, VisitedSet) of
+    true -> {CurrentPathRoles, ReachableDict};
+    false ->
+      % If not, we need to check each of the outgoing transitions for
+      % the roles involved in each path.
+      % Roles involved in a path = Transition roles + roles in subpath.
+      % Roles involved in this node = Union of all path roles.
+      NewVisitedSet = sets:add_element(NodeID, VisitedSet),
+      Transitions = get_transitions_from(NodeID, FSM),
+      {PathRoleUnion, ReachableDict1} =
+        lists:foldr(fun(T, {WorkingSet, WorkingDict}) ->
+                        {SubpathRoles, NewDict} =
+                          add_transition_roles(T, FSM, Monitor,
+                                               CurrentPathRoles, WorkingDict, NewVisitedSet),
+                          NewWorkingSet = sets:union(SubpathRoles, WorkingSet),
+                          {NewWorkingSet, NewDict}
+                    end,
+                    {sets:new(), ReachableDict}, Transitions),
+      % Now we have all path roles, we can store into the dict.
+      ReachableDict2 = orddict:store(NodeID, PathRoleUnion, ReachableDict1),
+      {PathRoleUnion, ReachableDict2}
+  end.
+
+
+
+
+
+
+
+
+
+
+
+
+%
+% traverse_outgoing_transitions([], _, _, _, _, ReachableSet, ReachableDict) ->
+%   {ReachableSet, ReachableDict};
+% traverse_outgoing_transitions([T|TS], FSM, Monitor, VisitedSet, InitialReachableSet,
+%                               WorkingReachableSet, ReachableDict) ->
+%   ID = element(2, T),
+%   RolesInvolved = sets:from_list(roles_involved(T)),
+%   {OutgoingReachableSet, ReachableDict1} =
+%     reachable_from_inner(ID, FSM, Monitor, ReachableDict,
+%                          RolesInvolved, VisitedSet),
+%   NewWorkingReachableSet = sets:union(WorkingReachableSet, OutgoingReachableSet),
+%   traverse_outgoing_transitions(TS, FSM, Monitor, VisitedSet,
+%                                 sets:union(OutgoingReachableSet, InitialReachableSet),
+%                                 NewWorkingReachableSet,
+%                                 ReachableDict1).
+%
+% reachable_from_inner(NodeID, FSM, Monitor, ReachableDict,
+%                      CurrentReachableSet, VisitedSet) ->
+%   io:format("Visiting node ~p...~n", [NodeID]),
+%   % Check whether we've already visited the node.
+%   IsElement = sets:is_element(NodeID, VisitedSet),
+%   if IsElement -> {CurrentReachableSet, ReachableDict};
+%      not IsElement ->
+%        % Check whether reachable set already in the dict
+%        case orddict:find(NodeID, ReachableDict) of
+%          % If so, return it
+%            {ok, ReachableSet} -> {ReachableSet, ReachableDict};
+%          error ->
+%            % If not, we need to do some work. Alas.
+%            % Get the transitions from the current node
+%            Transitions = get_transitions_from(NodeID, FSM),
+%            io:format("Transitions: ~p~n", [Transitions]),
+%            NewVisitedSet = sets:add_element(NodeID, VisitedSet),
+%
+%            % Now, traverse according to these transitions...
+%            {RolesInOutgoing, NewDict} =
+%              traverse_outgoing_transitions(Transitions, FSM, Monitor,
+%                                            NewVisitedSet, CurrentReachableSet, sets:new(),
+%                                            ReachableDict),
+%            %ReachableSet1 = sets:union(CurrentReachableSet, RolesInOutgoing),
+%            % Finally, add our node to the dictionary
+%            NewDict1 = orddict:store(NodeID, RolesInOutgoing, NewDict),
+%            io:format("RS1: ~p~nNewDict1:~p~n", [sets:to_list(RolesInOutgoing), NewDict1]),
+%            {RolesInOutgoing, NewDict1}
+%        end
+%   end.
+
+generate_reachability_dict(FSMID, Monitor) ->
+  FSM = get_fsm(FSMID, Monitor),
+  {_, Res} = reachable_from_inner(0, FSM, Monitor, sets:new(), orddict:new(), sets:new()),
+  Res.
+
+% is_role_reachable(RoleName, FSM) ->
+%   CurrentState = OuterMonitorInstance#monitor_instance.current_state,
+%   ReachabilityDict = OuterMonitorInstance#monitor_instance.reachability_dict,
+%   ReachableRoles = orddict:fetch(CurrentState, ReachabilityDict),
+%   sets:is_element(RoleName, ReachableRoles).
 
 %%%%%%%
 %%% API

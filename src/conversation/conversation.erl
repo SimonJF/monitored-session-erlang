@@ -95,3 +95,7 @@ subsession_complete(ConvKey, Result) ->
 subsession_failed(ConvKey, FailureName) ->
   {_, _, CID, _} = ConvKey,
   conversation_instance:subsession_complete(CID, FailureName).
+
+get_root_cid(ConvKey) ->
+  {_, _, CID, _} = ConvKey,
+  conversation_instance:get_root_pid(CID).
