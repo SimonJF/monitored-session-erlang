@@ -10,12 +10,12 @@
 -record(outer_monitor_instance, {protocol_name,
                                  role_name,
                                  monitors,
-                                 monitor_instances
+                                 monitor_instances,
+                                 reachability_dicts % FSM ID |-> (State ID |-> Involved roles, Involved FSMs)
                                 }).
 
 -record(monitor_instance, {fsm_id,
                            current_state = 0,
                            states,
-                           transitions,
-                           reachability_dict
+                           transitions
                           }).

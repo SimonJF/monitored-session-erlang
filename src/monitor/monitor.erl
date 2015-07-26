@@ -28,12 +28,18 @@ create_monitor(LocalProtocolAST = {local_protocol, ProtocolName, RoleName, _, _,
   end.
 
 instantiate_monitor(FSMID, States, Transitions) ->
-  FSM = #monitor_instance{fsm_id=FSMID,
-                          current_state=0,
-                          states=States,
-                          transitions=Transitions},
-  ReachabilityDict = generate_reachability_dict(FSM),
-  FSM#monitor_instance{reachability_dict=ReachabilityDict}.
+  #monitor_instance{fsm_id=FSMID,
+                    current_state=0,
+                    states=States,
+                    transitions=Transitions}.
+
+generate_reachability_dicts([]) -> [];
+generate_reachability_dicts([{FSMID, FSM}|XS]) ->
+  TempMonitor = instantiate_monitor(FSMID, FSM#monitor_gen_state.states,
+                                    FSM#monitor_gen_state.transitions),
+  ReachabilityDict = generate_reachability_dict(TempMonitor),
+  [{FSMID, ReachabilityDict}|generate_reachability_dicts(XS)].
+
 
 % Creates a monitor instance given a protocol name, role name,
 % and state and transition tables
@@ -44,10 +50,12 @@ create_monitor_instance(ProtocolName, RoleName, NestedFSMs) ->
                                         RootFSM#monitor_gen_state.transitions),
   FirstState = orddict:fetch(0, NestedFSMs),
   OuterMonitorInstances = orddict:store(0, RootFSMInstance, orddict:new()),
+  ReachabilityDicts = generate_reachability_dicts(orddict:to_list(NestedFSMs)),
   MonitorInstance = #outer_monitor_instance{protocol_name = ProtocolName,
                                             role_name = RoleName,
                                             monitors = NestedFSMs,
-                                            monitor_instances = OuterMonitorInstances},
+                                            monitor_instances = OuterMonitorInstances,
+                                            reachability_dicts = ReachabilityDicts},
   case FirstState of
     {ok, {par_node, FSMIDs}} ->
       instantiate_nested_fsms(FSMIDs, MonitorInstance);
@@ -415,38 +423,36 @@ generate_reachability_dict(FSM) ->
                                   orddict:new(), sets:new()),
   Res.
 
+get_reachability_dict(FSMID, Monitor) ->
+  ReachabilityDicts = Monitor#outer_monitor_instance.reachability_dicts,
+  orddict:fetch(FSMID, ReachabilityDicts).
+
 is_role_reachable(RoleName, Monitor) ->
-  RootFSM = get_root_fsm(Monitor),
-  is_role_reachable_inner(RoleName, RootFSM, Monitor).
+  is_role_reachable_inner(RoleName, 0, 0, Monitor).
 
-is_role_reachable_inner(RoleName, FSM, Monitor) ->
-  CurrentState = FSM#monitor_instance.current_state,
-  ReachabilityDict = FSM#monitor_instance.reachability_dict,
-  ReachableRoles = orddict:fetch(CurrentState, ReachabilityDict),
-  sets:is_element(RoleName, ReachableRoles).
+is_role_reachable_inner(RoleName, FSMID, CurrentState, Monitor) ->
+  ReachabilityDict = get_reachability_dict(FSMID, Monitor),
+  {ReachableRoles, InvolvedFSMs} = orddict:fetch(CurrentState, ReachabilityDict),
+  IsInvolved = sets:is_element(RoleName, ReachableRoles),
+  InvolvedFSMsList = sets:to_list(InvolvedFSMs),
+  IsInvolvedInNested =
+    lists:any(fun(NestedFSMID) ->
+                  check_nested_fsm_reachability(RoleName, NestedFSMID, Monitor) end,
+              InvolvedFSMsList),
+  IsInvolved or IsInvolvedInNested.
 
-
-% Check if the current state has any parallel transitions. If so, then we'll need
-% to check to see whether the role is reachable in any of the nested FSMs.
-check_reachable_parallel_transitions(RoleName, FSM, Monitor) ->
-  Transitions = get_transitions(FSM),
-  check_reachable_parallel_transitions_inner(RoleName, Transitions, FSM, Monitor).
-
-check_reachable_parallel_transitions_inner(_, [], _, _) ->
-  false;
-check_reachable_parallel_transitions_inner(RoleName, [{par_transition, _, NestedFSMIDs}|TS],
-                                           FSM, Monitor) ->
-  NestedRes = lists:any(fun(ID) -> NestedFSM = get_fsm(ID, Monitor),
-                       is_role_reachable_inner(RoleName, NestedFSM, Monitor) end,
-            NestedFSMIDs),
-  if NestedRes ->
-       true;
-     not NestedRes ->
-       check_reachable_parallel_transitions_inner(RoleName,
-                                                  TS, FSM, Monitor)
-  end;
-check_reachable_parallel_transitions_inner(RoleName, [_|TS], FSM, Monitor) ->
-  check_reachable_parallel_transitions_inner(RoleName, TS, FSM, Monitor).
+check_nested_fsm_reachability(RoleName, FSMID, Monitor) ->
+  MonitorInstances = Monitor#outer_monitor_instance.monitor_instances,
+  % First, check if the monitor's instantiated. If so, get the current
+  % state. If not, then it's 0.
+  NestedFSMStateID =
+    case orddict:find(FSMID, MonitorInstances) of
+      {ok, FSM} -> FSM#monitor_instance.current_state;
+      error -> 0
+    end,
+  % Alright, now, check to see if the role's reachable in the
+  % nested FSM
+  is_role_reachable_inner(RoleName, FSMID, NestedFSMStateID, Monitor).
 
 %%%%%%%
 %%% API
