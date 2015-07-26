@@ -72,12 +72,14 @@ test_fsm(Filename) ->
 print_reachability(Monitor) ->
   io:format("Printing reachability...~n"),
   MonitorInstance = monitor:create_monitor_instance("", "", Monitor),
-  ReachabilityDict = monitor:generate_reachability_dict(0, MonitorInstance),
-  ReachabilityDictList = orddict:to_list(ReachabilityDict),
-  lists:foreach(fun ({StateNum, Set}) ->
-                    List = sets:to_list(Set),
-                    io:format("~p: ~p~n", [StateNum, List]) end,
-                ReachabilityDictList).
+  % TODO: Will only have root -- others aren't statically initialised
+  lists:foreach(fun({FSMID, FSM}) ->
+    ReachabilityDictList = orddict:to_list(FSM#monitor_instance.reachability_dict),
+    lists:foreach(fun ({StateNum, Set}) ->
+                      List = sets:to_list(Set),
+                      io:format("~p: ~p~n", [StateNum, List]) end,
+                  ReachabilityDictList) end,
+                orddict:to_list(MonitorInstance#outer_monitor_instance.monitor_instances)).
 
 generate_module_monitors({module, _Name, _Imports, _Payloads, Protocols}) ->
   lists:map(fun (Protocol) ->

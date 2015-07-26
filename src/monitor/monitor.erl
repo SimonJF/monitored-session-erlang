@@ -28,12 +28,12 @@ create_monitor(LocalProtocolAST = {local_protocol, ProtocolName, RoleName, _, _,
   end.
 
 instantiate_monitor(FSMID, States, Transitions) ->
-  #monitor_instance{fsm_id=FSMID,
-                    current_state=0,
-                    states=States,
-                    transitions=Transitions,
-                    reachability_dict=orddict:new()}. %% FIXME: Reachability dict for nested FSMs? Union
-
+  FSM = #monitor_instance{fsm_id=FSMID,
+                          current_state=0,
+                          states=States,
+                          transitions=Transitions},
+  ReachabilityDict = generate_reachability_dict(FSM),
+  FSM#monitor_instance{reachability_dict=ReachabilityDict}.
 
 % Creates a monitor instance given a protocol name, role name,
 % and state and transition tables
@@ -350,7 +350,6 @@ roles_involved({start_subsession_transition, _, _, IRs, _}) -> IRs;
 roles_involved({subsession_success, _}) -> [];
 roles_involved({subsession_failure, _}) -> [];
 roles_involved(T) ->
-  io:format("T = ~p~n", [T]),
   InteractionType = element(1, T),
   RoleRes = element(3, T),
   IsList = (transition_kind(InteractionType) == send),
@@ -361,12 +360,12 @@ roles_involved(T) ->
   end.
 
 
-add_transition_roles(T, FSM, Monitor, CurrentPathRoles, ReachableDict, VisitedSet) ->
+add_transition_roles(T, FSM, CurrentPathRoles, ReachableDict, VisitedSet) ->
   TransitionRoles = sets:from_list(roles_involved(T)),
   ToID = element(2, T),
   NewCurrentPathRoles = sets:union(TransitionRoles, CurrentPathRoles),
   {SubpathRoles, NewDict} =
-    reachable_from_inner(ToID, FSM, Monitor, NewCurrentPathRoles,
+    reachable_from_inner(ToID, FSM, NewCurrentPathRoles,
                          ReachableDict, VisitedSet),
   {sets:union(SubpathRoles, TransitionRoles), NewDict}.
 
@@ -377,7 +376,7 @@ add_transition_roles(T, FSM, Monitor, CurrentPathRoles, ReachableDict, VisitedSe
 % CurrentReachableSet: Roles involved in this current path -- used if we revisit a node
 % ReachableDict: NodeID |-> [ReachableRole]
 % VisitedSet: Set of visited nodes
-reachable_from_inner(NodeID, FSM, Monitor, CurrentPathRoles, ReachableDict, VisitedSet) ->
+reachable_from_inner(NodeID, FSM, CurrentPathRoles, ReachableDict, VisitedSet) ->
   % First: check whether the node has already been visited.
   % If so, return the current reachable set.
   case sets:is_element(NodeID, VisitedSet) of
@@ -392,7 +391,7 @@ reachable_from_inner(NodeID, FSM, Monitor, CurrentPathRoles, ReachableDict, Visi
       {PathRoleUnion, ReachableDict1} =
         lists:foldr(fun(T, {WorkingSet, WorkingDict}) ->
                         {SubpathRoles, NewDict} =
-                          add_transition_roles(T, FSM, Monitor,
+                          add_transition_roles(T, FSM,
                                                CurrentPathRoles, WorkingDict, NewVisitedSet),
                           NewWorkingSet = sets:union(SubpathRoles, WorkingSet),
                           {NewWorkingSet, NewDict}
@@ -403,16 +402,15 @@ reachable_from_inner(NodeID, FSM, Monitor, CurrentPathRoles, ReachableDict, Visi
       {PathRoleUnion, ReachableDict2}
   end.
 
-generate_reachability_dict(FSMID, Monitor) ->
-  FSM = get_fsm(FSMID, Monitor),
-  {_, Res} = reachable_from_inner(0, FSM, Monitor, sets:new(), orddict:new(), sets:new()),
+generate_reachability_dict(FSM) ->
+  {_, Res} = reachable_from_inner(0, FSM, sets:new(), orddict:new(), sets:new()),
   Res.
 
-% is_role_reachable(RoleName, FSM) ->
-%   CurrentState = OuterMonitorInstance#monitor_instance.current_state,
-%   ReachabilityDict = OuterMonitorInstance#monitor_instance.reachability_dict,
-%   ReachableRoles = orddict:fetch(CurrentState, ReachabilityDict),
-%   sets:is_element(RoleName, ReachableRoles).
+is_role_reachable(RoleName, FSM) ->
+  CurrentState = FSM#monitor_instance.current_state,
+  ReachabilityDict = FSM#monitor_instance.reachability_dict,
+  ReachableRoles = orddict:fetch(CurrentState, ReachabilityDict),
+  sets:is_element(RoleName, ReachableRoles).
 
 %%%%%%%
 %%% API
