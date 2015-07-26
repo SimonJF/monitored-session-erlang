@@ -75,9 +75,12 @@ print_reachability(Monitor) ->
   % TODO: Will only have root -- others aren't statically initialised
   lists:foreach(fun({FSMID, FSM}) ->
     ReachabilityDictList = orddict:to_list(FSM#monitor_instance.reachability_dict),
-    lists:foreach(fun ({StateNum, Set}) ->
-                      List = sets:to_list(Set),
-                      io:format("~p: ~p~n", [StateNum, List]) end,
+    lists:foreach(fun ({StateNum, {RoleSet, FSMSet}}) ->
+                      RoleList = sets:to_list(RoleSet),
+                      FSMList = sets:to_list(FSMSet),
+                      io:format("~p: Roles: ~p, Nested FSMS: ~p~n", [StateNum,
+                                                                     RoleList,
+                                                                     FSMList]) end,
                   ReachabilityDictList) end,
                 orddict:to_list(MonitorInstance#outer_monitor_instance.monitor_instances)).
 

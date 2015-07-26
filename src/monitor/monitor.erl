@@ -343,31 +343,36 @@ check_action(Action, MonitorInstance) ->
 %%% Reachability Stuff
 %%%%%%%
 
-roles_involved({par_transition, _, _}) ->
-  %FIXME: We'll have to do something about this...
-  [];
-roles_involved({start_subsession_transition, _, _, IRs, _}) -> IRs;
-roles_involved({subsession_success, _}) -> [];
-roles_involved({subsession_failure, _}) -> [];
-roles_involved(T) ->
+roles_fsms_involved({par_transition, _, FSMIDs}) ->
+  {[], FSMIDs};
+roles_fsms_involved({start_subsession_transition, _, _, IRs, _}) -> {IRs, []};
+roles_fsms_involved({subsession_success, _}) -> {[], []};
+roles_fsms_involved({subsession_failure, _}) -> {[], []};
+roles_fsms_involved(T) ->
   InteractionType = element(1, T),
   RoleRes = element(3, T),
   IsList = (transition_kind(InteractionType) == send),
   if IsList ->
-       RoleRes;
+       {RoleRes, []};
      not IsList ->
-       [RoleRes]
+       {[RoleRes], []}
   end.
 
 
-add_transition_roles(T, FSM, CurrentPathRoles, ReachableDict, VisitedSet) ->
-  TransitionRoles = sets:from_list(roles_involved(T)),
+add_transition_info(T, FSM, CurrentPathRoles, CurrentPathFSMIDs,
+                     ReachableDict, VisitedSet) ->
+  {TransitionRoleList, TransitionFSMIDsList} = roles_fsms_involved(T),
+  TransitionRoles = sets:from_list(TransitionRoleList),
+  TransitionFSMIDs = sets:from_list(TransitionFSMIDsList),
   ToID = element(2, T),
   NewCurrentPathRoles = sets:union(TransitionRoles, CurrentPathRoles),
-  {SubpathRoles, NewDict} =
-    reachable_from_inner(ToID, FSM, NewCurrentPathRoles,
+  NewCurrentPathFSMIDs = sets:union(TransitionFSMIDs, CurrentPathFSMIDs),
+  {SubpathRoles, SubpathFSMIDs, NewDict} =
+    reachable_from_inner(ToID, FSM, NewCurrentPathRoles, NewCurrentPathFSMIDs,
                          ReachableDict, VisitedSet),
-  {sets:union(SubpathRoles, TransitionRoles), NewDict}.
+  {sets:union(SubpathRoles, TransitionRoles),
+   sets:union(SubpathFSMIDs, TransitionFSMIDs),
+   NewDict}.
 
 
 % NodeID: Current node ID
@@ -376,11 +381,12 @@ add_transition_roles(T, FSM, CurrentPathRoles, ReachableDict, VisitedSet) ->
 % CurrentReachableSet: Roles involved in this current path -- used if we revisit a node
 % ReachableDict: NodeID |-> [ReachableRole]
 % VisitedSet: Set of visited nodes
-reachable_from_inner(NodeID, FSM, CurrentPathRoles, ReachableDict, VisitedSet) ->
+reachable_from_inner(NodeID, FSM, CurrentPathRoles, CurrentPathFSMIDs,
+                     ReachableDict, VisitedSet) ->
   % First: check whether the node has already been visited.
   % If so, return the current reachable set.
   case sets:is_element(NodeID, VisitedSet) of
-    true -> {CurrentPathRoles, ReachableDict};
+    true -> {CurrentPathRoles, CurrentPathFSMIDs, ReachableDict};
     false ->
       % If not, we need to check each of the outgoing transitions for
       % the roles involved in each path.
@@ -388,29 +394,59 @@ reachable_from_inner(NodeID, FSM, CurrentPathRoles, ReachableDict, VisitedSet) -
       % Roles involved in this node = Union of all path roles.
       NewVisitedSet = sets:add_element(NodeID, VisitedSet),
       Transitions = get_transitions_from(NodeID, FSM),
-      {PathRoleUnion, ReachableDict1} =
-        lists:foldr(fun(T, {WorkingSet, WorkingDict}) ->
-                        {SubpathRoles, NewDict} =
-                          add_transition_roles(T, FSM,
-                                               CurrentPathRoles, WorkingDict, NewVisitedSet),
-                          NewWorkingSet = sets:union(SubpathRoles, WorkingSet),
-                          {NewWorkingSet, NewDict}
+      {PathRoleUnion, PathFSMIDUnion, ReachableDict1} =
+        lists:foldr(fun(T, {WorkingRoleSet, WorkingIDSet, WorkingDict}) ->
+                        {SubpathRoles, SubpathFSMIDs, NewDict} =
+                          add_transition_info(T, FSM,
+                                              CurrentPathRoles, CurrentPathFSMIDs,
+                                              WorkingDict, NewVisitedSet),
+                          NewWorkingRoleSet = sets:union(SubpathRoles, WorkingRoleSet),
+                          NewWorkingIDSet = sets:union(SubpathFSMIDs, WorkingIDSet),
+                          {NewWorkingRoleSet, NewWorkingIDSet, NewDict}
                     end,
-                    {sets:new(), ReachableDict}, Transitions),
+                    {sets:new(), sets:new(), ReachableDict}, Transitions),
       % Now we have all path roles, we can store into the dict.
-      ReachableDict2 = orddict:store(NodeID, PathRoleUnion, ReachableDict1),
-      {PathRoleUnion, ReachableDict2}
+      ReachableDict2 = orddict:store(NodeID, {PathRoleUnion, PathFSMIDUnion}, ReachableDict1),
+      {PathRoleUnion, PathFSMIDUnion, ReachableDict2}
   end.
 
 generate_reachability_dict(FSM) ->
-  {_, Res} = reachable_from_inner(0, FSM, sets:new(), orddict:new(), sets:new()),
+  {_, _, Res} = reachable_from_inner(0, FSM, sets:new(), sets:new(),
+                                  orddict:new(), sets:new()),
   Res.
 
-is_role_reachable(RoleName, FSM) ->
+is_role_reachable(RoleName, Monitor) ->
+  RootFSM = get_root_fsm(Monitor),
+  is_role_reachable_inner(RoleName, RootFSM, Monitor).
+
+is_role_reachable_inner(RoleName, FSM, Monitor) ->
   CurrentState = FSM#monitor_instance.current_state,
   ReachabilityDict = FSM#monitor_instance.reachability_dict,
   ReachableRoles = orddict:fetch(CurrentState, ReachabilityDict),
   sets:is_element(RoleName, ReachableRoles).
+
+
+% Check if the current state has any parallel transitions. If so, then we'll need
+% to check to see whether the role is reachable in any of the nested FSMs.
+check_reachable_parallel_transitions(RoleName, FSM, Monitor) ->
+  Transitions = get_transitions(FSM),
+  check_reachable_parallel_transitions_inner(RoleName, Transitions, FSM, Monitor).
+
+check_reachable_parallel_transitions_inner(_, [], _, _) ->
+  false;
+check_reachable_parallel_transitions_inner(RoleName, [{par_transition, _, NestedFSMIDs}|TS],
+                                           FSM, Monitor) ->
+  NestedRes = lists:any(fun(ID) -> NestedFSM = get_fsm(ID, Monitor),
+                       is_role_reachable_inner(RoleName, NestedFSM, Monitor) end,
+            NestedFSMIDs),
+  if NestedRes ->
+       true;
+     not NestedRes ->
+       check_reachable_parallel_transitions_inner(RoleName,
+                                                  TS, FSM, Monitor)
+  end;
+check_reachable_parallel_transitions_inner(RoleName, [_|TS], FSM, Monitor) ->
+  check_reachable_parallel_transitions_inner(RoleName, TS, FSM, Monitor).
 
 %%%%%%%
 %%% API
