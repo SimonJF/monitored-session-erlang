@@ -432,14 +432,6 @@ is_role_reachable(RoleName, Monitor) ->
   CurrentState = current_fsm_state_id(FSM),
   is_role_reachable_inner(RoleName, 0, CurrentState, Monitor).
 
-% Gets the involvement info (reachable roles, involved FSM IDs).
-% Should there not be an entry, returns {sets:new(), sets:new()}.
-retrieve_involvement_info(StateNum, ReachabilityDict) ->
-  case orddict:find(StateNum, ReachabilityDict) of
-    {ok, {Roles, FSMIDs}} -> {Roles, FSMIDs};
-    error -> {sets:new(), sets:new()}
-  end.
-
 is_role_reachable_inner(RoleName, FSMID, CurrentState, Monitor) ->
   ReachabilityDict = get_reachability_dict(FSMID, Monitor),
   {ReachableRoles, InvolvedFSMs} = orddict:fetch(CurrentState, ReachabilityDict),
