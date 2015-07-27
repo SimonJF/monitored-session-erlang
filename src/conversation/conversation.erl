@@ -35,6 +35,8 @@ call({P, R, C, MonitorPID}, Recipient, MessageName, _, Payload) ->
 
 % Used to transition to another role.
 become({_, _, _, MonitorPID}, RegAtom, RoleName, Operation, Arguments) ->
+  actor_monitor:become(MonitorPID, RegAtom, RoleName, Operation, Arguments);
+become(MonitorPID, RegAtom, RoleName, Operation, Arguments) when is_pid(MonitorPID) ->
   actor_monitor:become(MonitorPID, RegAtom, RoleName, Operation, Arguments).
 
 register_conversation(RegAtom, {ProtocolName, RoleName, ConvID, MonitorPID}) ->
@@ -50,12 +52,15 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
   case RoleRes of
     {ok, Roles} ->
       % Next, need to start a new conversation process
-      ConversationProc = conversation_instance:start(ProtocolName, Roles),
+      %ConversationProc = conversation_instance:start(ProtocolName, Roles),
+      ConversationProc =
+        conversation_instance_sup:start_conversation_instance(ProtocolName, Roles),
       case ConversationProc of
         % And start the invitation system
         {ok, ConvPID} ->
           protocol_registry:start_invitation(ProtocolName, ConvPID, Role, MonitorPID);
         Err ->
+          error_logger:error_msg("Bad conv proc result: Err ~p~n", [Err]),
           actor_monitor:conversation_setup_failed(MonitorPID, ProtocolName,
                                                   Role, {bad_conversation_process, Err})
       end;

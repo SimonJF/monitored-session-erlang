@@ -176,29 +176,50 @@ get_role_alive_status_inner([{R, E}|XS], {Alive, Dead}) ->
        get_role_alive_status_inner(XS, {Alive, [R|Dead]})
   end.
 
+check_role_usage([], _) -> not_used;
+check_role_usage([{Role, Endpoint}|XS], DownRole)
+  when DownRole =/= Role ->
+  case (catch(actor_monitor:check_role_reachable(Endpoint, self(),
+                                                 Role, DownRole))) of
+    % If it's reachable, no need to check the rest, report
+    true -> {used, Role};
+    % If not, we need to check the rest
+    false -> check_role_usage(XS, DownRole);
+    _Other -> {down, Role}
+  end;
+check_role_usage([_|XS], DownRole) ->
+  check_role_usage(XS, DownRole).
+
 handle_begin_continuation_safety_check(MonitorRef, State) ->
   RoleMapping = State#conv_inst_state.role_mapping,
+  RoleEndpoints = orddict:to_list(RoleMapping),
   ParticipantMonitorRefs = State#conv_inst_state.participant_monitor_refs,
   case orddict:find(MonitorRef, ParticipantMonitorRefs) of
     {ok, RoleName} ->
+      error_logger:info_msg("Role ~p down. Beginning safety check.~n", [RoleName]),
+
       % Iterate over each -- should a node fail, ignore it, it'll be picked up later
-      UsedInRemainder =
-        orddict:fold(fun(LocalRole, Endpoint, Acc) ->
-                       Res = case (catch (actor_monitor:check_role_reachable(Endpoint, self(),
-                                                                 LocalRole, RoleName))) of
-                         true -> true;
-                         false -> false;
-                         _Other -> false
-                       end,
-                       Res or Acc end, false, RoleMapping),
-      % Now, if Res is false, then the dead role's not reachable from anywhere.
-      % In which case, celebrate, we can continue as normal.
-      % If not, we'll need to do some stuff. For now, we can end the session.
-      if UsedInRemainder ->
-           end_conversation(self(), {role_offline, RoleName});
-         not UsedInRemainder -> ok
+      % If UsedInRemainder, there's at least one actor which needs to communicate
+      % with the dead role in the remainder of the session.
+      % If the down role is used in the remainder, or a call failed, we abort the
+      % session.
+      % If it's not, however, it's fine to proceed.
+      case check_role_usage(RoleEndpoints, RoleName) of
+        not_used ->
+          error_logger:info_msg("Role ~p passed safety check: unused in all other participants.~n",
+                                [RoleName]),
+          ok; % We're golden
+        {used, ReferencerRole} ->
+          error_logger:info_msg("Safety check failed: ~p still needed in ~p~n", [RoleName, ReferencerRole]),
+          end_conversation(self(), {role_offline, RoleName});
+        {down, DownRole} ->
+          error_logger:info_msg("Safety check failed: Unable to contact ~p~n", [RoleName, DownRole]),
+          end_conversation(self(), safety_check_failed)
       end;
-    error -> ok
+    error ->
+      % Couldn't find in the participant monitor refs. Probably something different.
+      exit(unknown_monitor_offline),
+      ok
   end.
 
 handle_get_endpoints(RoleList, State) ->
@@ -371,11 +392,8 @@ terminate(_Reason, _State) -> ok.
 %%%% API
 %%%%
 
-start(ProtocolName, RoleSpecs) ->
-  gen_server2:start(conversation_instance, [ProtocolName, RoleSpecs], []).
-
-start(ProtocolName, RoleSpecs, FailureHandlerFn) ->
-  gen_server2:start(conversation_instance, [ProtocolName, RoleSpecs, FailureHandlerFn], []).
+start_link(ProtocolName, RoleSpecs) ->
+  gen_server2:start_link(conversation_instance, [ProtocolName, RoleSpecs], []).
 
 end_conversation(ConvID, Reason) ->
   gen_server2:cast(ConvID, {end_conversation, Reason}).
