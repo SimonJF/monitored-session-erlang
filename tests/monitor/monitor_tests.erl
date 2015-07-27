@@ -305,3 +305,73 @@ subsession_bad2_test() ->
   {ok, MonitorInstance} = subsession_test_setup(),
   {error, _} = monitor:start_subsession("PerformBooking", ["Customer"],
                                         ["TravelBooking", "FlightBookingService", "HotelBookingService"], MonitorInstance).
+
+
+rec_reachability_test1_test() ->
+  Filename = ?SPEC_DIRECTORY ++ "RecReachabilityTest_A.scr",
+  ProtocolName = "RecReachabilityTest",
+  RoleName = "A",
+  {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
+  true = monitor:is_role_reachable("B", MonitorInstance),
+  true = monitor:is_role_reachable("C", MonitorInstance),
+
+  Msg1 = message:message(0, "A", ["B"], "hello", [], []),
+  {ok, MonitorInstance1} = monitor:send(Msg1, MonitorInstance),
+
+  % Take first branch. First branch is recursive, so both B and C should be reachable
+  Msg2 = message:message(0, "B", ["A"], "X", [], []),
+  {ok, MonitorInstance2} = monitor:recv(Msg2, MonitorInstance1),
+  true = monitor:is_role_reachable("B", MonitorInstance2),
+  true = monitor:is_role_reachable("C", MonitorInstance2).
+
+rec_reachability_test2_test() ->
+  Filename = ?SPEC_DIRECTORY ++ "RecReachabilityTest_A.scr",
+  ProtocolName = "RecReachabilityTest",
+  RoleName = "A",
+  {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
+  true = monitor:is_role_reachable("B", MonitorInstance),
+  true = monitor:is_role_reachable("C", MonitorInstance),
+
+  Msg1 = message:message(0, "A", ["B"], "hello", [], []),
+  {ok, MonitorInstance1} = monitor:send(Msg1, MonitorInstance),
+
+  % Take second branch. Not recursive, so C should be reachable but not B.
+  Msg2 = message:message(0, "B", ["A"], "Z", [], []),
+  {ok, MonitorInstance2} = monitor:recv(Msg2, MonitorInstance1),
+  false = monitor:is_role_reachable("B", MonitorInstance2),
+  true = monitor:is_role_reachable("C", MonitorInstance2).
+
+par_reachability_test1_test() ->
+  Filename = ?SPEC_DIRECTORY ++ "ParReachabilityTest_A.scr",
+  ProtocolName = "ParReachabilityTest",
+  RoleName = "A",
+  {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
+
+  % B, C, and D should be reachable to start
+  true = monitor:is_role_reachable("B", MonitorInstance),
+  true = monitor:is_role_reachable("C", MonitorInstance),
+  true = monitor:is_role_reachable("D", MonitorInstance),
+
+  % Next, send X() to B: only C and D should be reachable after
+  Msg1 = message:message(0, "A", ["B"], "X", [], []),
+  {ok, MonitorInstance1} = monitor:send(Msg1, MonitorInstance),
+  false = monitor:is_role_reachable("B", MonitorInstance1),
+  true = monitor:is_role_reachable("C", MonitorInstance1),
+  true = monitor:is_role_reachable("D", MonitorInstance1),
+
+  % Next, send Z1() to C: only D should be reachable after
+  Msg2 = message:message(0, "A", ["C"], "Z1", [], []),
+  {ok, MonitorInstance2} = monitor:send(Msg2, MonitorInstance1),
+  false = monitor:is_role_reachable("B", MonitorInstance2),
+  false= monitor:is_role_reachable("C", MonitorInstance2),
+  true = monitor:is_role_reachable("D", MonitorInstance2),
+
+  % Finally, send Z to D: no roles should be reachable.
+  Msg3 = message:message(0, "A", ["D"], "Z", [], []),
+  {ok, MonitorInstance3} = monitor:send(Msg3, MonitorInstance2),
+  false = monitor:is_role_reachable("B", MonitorInstance3),
+  false = monitor:is_role_reachable("C", MonitorInstance3),
+  false = monitor:is_role_reachable("D", MonitorInstance3).
+
+
+

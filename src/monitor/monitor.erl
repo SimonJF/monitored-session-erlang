@@ -353,9 +353,9 @@ check_action(Action, MonitorInstance) ->
 
 roles_fsms_involved({par_transition, _, FSMIDs}) ->
   {[], FSMIDs};
-roles_fsms_involved({start_subsession_transition, _, _, IRs, _}) -> {IRs, []};
+roles_fsms_involved({start_subsession, _, _, IRs, _}) -> {IRs, []};
 roles_fsms_involved({subsession_success, _}) -> {[], []};
-roles_fsms_involved({subsession_failure, _}) -> {[], []};
+roles_fsms_involved({subsession_failure, _, _}) -> {[], []};
 roles_fsms_involved(T) ->
   InteractionType = element(1, T),
   RoleRes = element(3, T),
@@ -428,7 +428,17 @@ get_reachability_dict(FSMID, Monitor) ->
   orddict:fetch(FSMID, ReachabilityDicts).
 
 is_role_reachable(RoleName, Monitor) ->
-  is_role_reachable_inner(RoleName, 0, 0, Monitor).
+  FSM = get_fsm(0, Monitor),
+  CurrentState = current_fsm_state_id(FSM),
+  is_role_reachable_inner(RoleName, 0, CurrentState, Monitor).
+
+% Gets the involvement info (reachable roles, involved FSM IDs).
+% Should there not be an entry, returns {sets:new(), sets:new()}.
+retrieve_involvement_info(StateNum, ReachabilityDict) ->
+  case orddict:find(StateNum, ReachabilityDict) of
+    {ok, {Roles, FSMIDs}} -> {Roles, FSMIDs};
+    error -> {sets:new(), sets:new()}
+  end.
 
 is_role_reachable_inner(RoleName, FSMID, CurrentState, Monitor) ->
   ReachabilityDict = get_reachability_dict(FSMID, Monitor),
