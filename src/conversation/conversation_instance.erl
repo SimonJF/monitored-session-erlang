@@ -213,7 +213,7 @@ handle_begin_continuation_safety_check(MonitorRef, State) ->
           error_logger:info_msg("Safety check failed: ~p still needed in ~p~n", [RoleName, ReferencerRole]),
           end_conversation(self(), {role_offline, RoleName});
         {down, DownRole} ->
-          error_logger:info_msg("Safety check failed: Unable to contact ~p~n", [RoleName, DownRole]),
+          error_logger:info_msg("Safety check failed: Unable to contact ~p~n", [DownRole]),
           end_conversation(self(), safety_check_failed)
       end;
     error ->

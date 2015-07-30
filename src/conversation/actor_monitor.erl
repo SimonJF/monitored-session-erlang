@@ -279,18 +279,18 @@ deliver_messages_inner([Role|Roles], RoleMap, Protocol, RoleName, ConvID, Msg, {
         {error, _Err} ->
           % Node alive, but monitor rejected message, add to rejected list
           deliver_messages_inner(Roles, RoleMap, Protocol, RoleName, ConvID,
-                            Msg, {Ok, D, [RoleName|R], NF})
+                            Msg, {Ok, D, [Role|R], NF})
       catch
         _:Err ->
           %io:format("Error in queue message call: ~p~n", [Err]),
           % Actor offline, add to Dead list
           deliver_messages_inner(Roles, RoleMap, Protocol, RoleName, ConvID,
-                            Msg, {Ok, [RoleName|D], R, NF})
+                            Msg, {Ok, [Role|D], R, NF})
       end;
     error ->
-      % Node not found -- user entered it incorrectly. Add to not found
+      % Role not found -- user entered it incorrectly. Add to not found
       deliver_messages_inner(Role, RoleMap, Protocol, RoleName, ConvID,
-                        Msg, {Ok, D, R, [RoleName|NF]})
+                        Msg, {Ok, D, R, [Role|NF]})
   end.
 
 % Commit a message to a set of endpoints
@@ -305,22 +305,40 @@ drop_outgoing_messages([EP|EPs], Msg) ->
   actor_monitor:drop_message(EP, message:message_id(Msg)),
   drop_outgoing_messages(EPs, Msg).
 
+
+direct_deliver_outgoing_message(Recipient, ConvRoutingTable, ProtocolName,
+                                ConvID, Msg) ->
+  case orddict:find(Recipient, ConvRoutingTable) of
+    {ok, Endpoint} ->
+      actor_monitor:direct_deliver_message(Endpoint, ProtocolName, Recipient, ConvID, Msg);
+    error -> {error, {nonexistent_role, Recipient}}
+  end.
+
 % Lookup the destination role, and forward to its monitor.
 deliver_outgoing_message(ProtocolName, RoleName, ConvID, Msg, State) ->
   %io:format("Message data: ~p~n", [Msg]),
   Recipients = message:message_recipients(Msg),
   GlobalRoutingTable = State#monitor_state.routing_table,
   ConvRoutingTable = orddict:fetch(ConvID, GlobalRoutingTable),
-  MonitorAndQueueRes = deliver_messages(Recipients, ConvRoutingTable,
-                                        ProtocolName, RoleName, ConvID, Msg),
-  case MonitorAndQueueRes of
-    {OkEndpoints, [], [], []} ->
-      % Everything was successful
-      commit_outgoing_messages(OkEndpoints, Msg),
-      ok;
-    {OkEndpoints, D, R, NF} ->
-      drop_outgoing_messages(OkEndpoints, Msg),
-      {error, {queue_failed, D, R, NF}}
+  % Optimisation: if there's only the one participant, we don't have to
+  % do any queueing.
+  RecipientLength = length(Recipients),
+  if RecipientLength == 1 ->
+       [Recipient] = Recipients,
+       direct_deliver_outgoing_message(Recipient, ConvRoutingTable, ProtocolName,
+                                       ConvID, Msg);
+     RecipientLength =/= 1 ->
+       MonitorAndQueueRes = deliver_messages(Recipients, ConvRoutingTable,
+                                             ProtocolName, RoleName, ConvID, Msg),
+       case MonitorAndQueueRes of
+         {OkEndpoints, [], [], []} ->
+           % Everything was successful
+           commit_outgoing_messages(OkEndpoints, Msg),
+           ok;
+         {OkEndpoints, D, R, NF} ->
+           drop_outgoing_messages(OkEndpoints, Msg),
+           {error, {queue_failed, D, R, NF}}
+       end
   end.
 
 
@@ -460,6 +478,23 @@ handle_send_delayed_invite(ProtocolName, RoleName, ConversationID, InviteeMonito
       % Couldn't find protocol
       Err -> {reply, Err, State}
     end.
+
+monitor_and_deliver(ProtocolName, RoleName, ConvID, Msg, State) ->
+  MonitorRes = monitor_msg(recv, Msg, ProtocolName, RoleName, ConvID, State),
+  case MonitorRes of
+    {ok, NewMonitorInstance} ->
+      Monitors = State#monitor_state.monitors,
+      NewMonitors = orddict:store({ConvID, RoleName},
+                                   NewMonitorInstance, Monitors),
+      NewState = State#monitor_state{monitors=NewMonitors},
+      % If something is in the monitors table, it should be in the routing table.
+      GlobalRoutingTable = State#monitor_state.routing_table,
+      ConvRoutingTable = orddict:fetch(ConvID, GlobalRoutingTable),
+      Endpoint = orddict:fetch(RoleName, ConvRoutingTable),
+      ssa_gen_server:message(Endpoint, ProtocolName, RoleName, ConvID, Msg),
+      {ok, NewState};
+    {error, Err} -> {{error, Err}, State}
+  end.
 
 monitor_and_queue(ProtocolName, RoleName, ConvID, Msg, State) ->
   MsgRef = message:message_id(Msg),
@@ -688,6 +723,9 @@ handle_call({send_msg, CurrentProtocol, CurrentRole, ConversationID, Recipients,
     handle_outgoing_message(CurrentProtocol, CurrentRole, ConversationID, Recipients,
                             MessageName, Types, Payload, State),
   {reply, Reply, NewState};
+handle_call({direct_deliver_msg, ProtocolName, RoleName, ConvID, Msg}, _, State) ->
+  {Res, NewState} = monitor_and_deliver(ProtocolName, RoleName, ConvID, Msg, State),
+  {reply, Res, NewState};
 handle_call({queue_msg, ProtocolName, RoleName, ConvID, Msg}, _From, State) ->
   %io:format("In queue msg handler~n"),
   {Res, NewState} = monitor_and_queue(ProtocolName, RoleName, ConvID, Msg, State),
@@ -831,6 +869,9 @@ send_message({ProtocolName, RoleName, ConversationID, MonitorPID},
                   {send_msg, ProtocolName, RoleName, ConversationID,
                    Recipients, MessageName, Types, Payload}).
 
+direct_deliver_message(MonitorPID, ProtocolName, RoleName, ConvID, Msg) ->
+  gen_server2:call(MonitorPID, {direct_deliver_msg, ProtocolName, RoleName, ConvID, Msg}).
+
 queue_message(MonitorPID, ProtocolName, RoleName, ConvID, Msg) ->
   gen_server2:call(MonitorPID, {queue_msg, ProtocolName, RoleName, ConvID, Msg}).
 
@@ -862,9 +903,6 @@ outgoing_call_response(MonitorPID, ProtocolName, RoleName, ConvID, Recipient, Me
 incoming_call_response(MonitorPID, ProtocolName, RoleName, ConvID, Message, From) ->
   gen_server2:cast(MonitorPID, {incoming_call_resp, ProtocolName, RoleName, ConvID,
                                 Message, From}).
-
-%subsession_setup_success(MonitorPID, SubsessionPID) ->
-%  gen_server2:cast(MonitorPID, {ssa_subsession_setup_success, SubsessionPID}).
 
 subsession_setup_failed(MonitorPID, SubsessionName, SubsessionPID, InitiatorPN,
                         InitiatorRN, InitiatorCID, Reason) ->
