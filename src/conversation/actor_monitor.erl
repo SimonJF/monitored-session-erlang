@@ -490,18 +490,21 @@ handle_send_delayed_invite(ProtocolName, RoleName, ConversationID, InviteeMonito
     end.
 
 monitor_and_deliver_noerr(ProtocolName, RoleName, ConvID, Msg, State) ->
-  MonitorRes = monitor_msg(recv, Msg, ProtocolName, RoleName, ConvID, State),
-  case MonitorRes of
-    {ok, NewMonitorInstance} ->
-      Monitors = State#monitor_state.monitors,
-      NewMonitors = orddict:store({ConvID, RoleName},
-                                   NewMonitorInstance, Monitors),
-      NewState = State#monitor_state{monitors=NewMonitors},
-      ActorPID = State#monitor_state.actor_pid,
-      ssa_gen_server:message(ActorPID, ProtocolName, RoleName, ConvID, Msg),
-      NewState;
-    {error, Err} -> State
-  end.
+  ActorPID = State#monitor_state.actor_pid,
+  ssa_gen_server:message(ActorPID, ProtocolName, RoleName, ConvID, Msg),
+  State.
+ %MonitorRes = monitor_msg(recv, Msg, ProtocolName, RoleName, ConvID, State),
+ %case MonitorRes of
+ %  {ok, NewMonitorInstance} ->
+ %    Monitors = State#monitor_state.monitors,
+ %    NewMonitors = orddict:store({ConvID, RoleName},
+ %                                 NewMonitorInstance, Monitors),
+ %    NewState = State#monitor_state{monitors=NewMonitors},
+ %    ActorPID = State#monitor_state.actor_pid,
+ %    ssa_gen_server:message(ActorPID, ProtocolName, RoleName, ConvID, Msg),
+ %    NewState;
+ %  {error, Err} -> State
+ %end.
 
 monitor_and_deliver(ProtocolName, RoleName, ConvID, Msg, State) ->
   MonitorRes = monitor_msg(recv, Msg, ProtocolName, RoleName, ConvID, State),
