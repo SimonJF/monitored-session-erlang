@@ -383,9 +383,14 @@ handle_conversation_ended(ConversationID, Reason, State) ->
                               Monitors),
   NewBecomeConversations = filter_orddict(fun({_, CID}) -> CID =/= ConversationID end,
                                           BecomeConvs),
+  RoutingTable = State#monitor_state.routing_table,
+  NewRoutingTable = filter_orddict(fun({CID, _}) -> CID =/= ConversationID end,
+                                   RoutingTable),
   NewState = State#monitor_state{active_protocols=NewActiveProtocols,
                                  registered_become_conversations=NewBecomeConversations,
-                                 monitors=NewMonitors},
+                                 monitors=NewMonitors,
+                                 routing_table=NewRoutingTable
+                                },
   ssa_gen_server:conversation_ended(ActorPID, ConversationID, Reason),
   NewState.
 
