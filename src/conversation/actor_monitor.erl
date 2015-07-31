@@ -418,32 +418,36 @@ handle_outgoing_message(ProtocolName, RoleName, ConversationID, Recipients,
   % Construct a message instance, send to the monitor, and check the result
   MessageData = message:message(make_ref(), RoleName, Recipients,
                                 MessageName, Types, Payload),
-  MonitorRes = monitor_msg(send, MessageData, ProtocolName, RoleName,
-                           ConversationID, State),
-  case MonitorRes of
-      {ok, NewMonitorInstance} ->
-        Monitors = State#monitor_state.monitors,
-        NewMonitors = orddict:store({ConversationID, RoleName},
-                                    NewMonitorInstance,
-                                    Monitors),
-        NewState = State#monitor_state{monitors=NewMonitors},
-        OutgoingRes =
-          deliver_outgoing_message(ProtocolName, RoleName, ConversationID,
-                                   MessageData, IsNoErr, NewState),
-        % Update monitors only if sending was successful
-        NewState1 =
-          if OutgoingRes == ok -> NewState;
-             OutgoingRes =/= ok -> State
-          end,
+  deliver_outgoing_message(ProtocolName, RoleName, ConversationID,
+                           MessageData, IsNoErr, State),
+  {ok, State}.
 
-        if OutgoingRes =/= ok ->
-             handle_send_failed(ConversationID, RoleName, State);
-           OutgoingRes == ok -> ok
-        end,
-        {OutgoingRes, NewState1};
-      Err ->
-        {Err, State}
-  end.
+ %MonitorRes = monitor_msg(send, MessageData, ProtocolName, RoleName,
+ %                         ConversationID, State),
+ %case MonitorRes of
+ %    {ok, NewMonitorInstance} ->
+ %      Monitors = State#monitor_state.monitors,
+ %      NewMonitors = orddict:store({ConversationID, RoleName},
+ %                                  NewMonitorInstance,
+ %                                  Monitors),
+ %      NewState = State#monitor_state{monitors=NewMonitors},
+ %      OutgoingRes =
+ %        deliver_outgoing_message(ProtocolName, RoleName, ConversationID,
+ %                                 MessageData, IsNoErr, NewState),
+ %      % Update monitors only if sending was successful
+ %      NewState1 =
+ %        if OutgoingRes == ok -> NewState;
+ %           OutgoingRes =/= ok -> State
+ %        end,
+
+ %      if OutgoingRes =/= ok ->
+ %           handle_send_failed(ConversationID, RoleName, State);
+ %         OutgoingRes == ok -> ok
+ %      end,
+ %      {OutgoingRes, NewState1};
+ %    Err ->
+ %      {Err, State}
+ %end.
 
 handle_send_failed(ConvID, RoleName, State) ->
   error_logger:error_msg("Could not reach ~p, terminating conversation~n", [RoleName]),
