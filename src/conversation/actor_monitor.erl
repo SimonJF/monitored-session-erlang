@@ -307,20 +307,15 @@ drop_outgoing_messages([EP|EPs], Msg) ->
 
 
 direct_deliver_outgoing_message(Recipient, ConvRoutingTable, ProtocolName,
-                                ConvID, Msg, IsNoErr) ->
+                                ConvID, Msg) ->
   case orddict:find(Recipient, ConvRoutingTable) of
     {ok, Endpoint} ->
-      %actor_monitor:direct_deliver_message(Endpoint, ProtocolName, Recipient, ConvID, Msg);
-      if IsNoErr ->
-           actor_monitor:direct_deliver_message_noerr(Endpoint, ProtocolName, Recipient, ConvID, Msg);
-        not IsNoErr ->
-           actor_monitor:direct_deliver_message(Endpoint, ProtocolName, Recipient, ConvID, Msg)
-      end;
+      actor_monitor:direct_deliver_message(Endpoint, ProtocolName, Recipient, ConvID, Msg);
     error -> {error, {nonexistent_role, Recipient}}
   end.
 
 % Lookup the destination role, and forward to its monitor.
-deliver_outgoing_message(ProtocolName, RoleName, ConvID, Msg, IsNoErr, State) ->
+deliver_outgoing_message(ProtocolName, RoleName, ConvID, Msg, State) ->
   %io:format("Message data: ~p~n", [Msg]),
   Recipients = message:message_recipients(Msg),
   GlobalRoutingTable = State#monitor_state.routing_table,
@@ -331,7 +326,7 @@ deliver_outgoing_message(ProtocolName, RoleName, ConvID, Msg, IsNoErr, State) ->
   if RecipientLength == 1 ->
        [Recipient] = Recipients,
        direct_deliver_outgoing_message(Recipient, ConvRoutingTable, ProtocolName,
-                                       ConvID, Msg, IsNoErr);
+                                       ConvID, Msg);
      RecipientLength =/= 1 ->
        MonitorAndQueueRes = deliver_messages(Recipients, ConvRoutingTable,
                                              ProtocolName, RoleName, ConvID, Msg),
@@ -414,12 +409,13 @@ handle_become(RegAtom, RoleName, Operation, Arguments, State) ->
   end.
 
 handle_outgoing_message(ProtocolName, RoleName, ConversationID, Recipients,
-                        MessageName, Types, Payload, IsNoErr, State) ->
+                        MessageName, Types, Payload, State) ->
   % Construct a message instance, send to the monitor, and check the result
   MessageData = message:message(make_ref(), RoleName, Recipients,
                                 MessageName, Types, Payload),
+
   MonitorRes = monitor_msg(send, MessageData, ProtocolName, RoleName,
-                           ConversationID, State),
+                          ConversationID, State),
   case MonitorRes of
       {ok, NewMonitorInstance} ->
         Monitors = State#monitor_state.monitors,
@@ -429,7 +425,7 @@ handle_outgoing_message(ProtocolName, RoleName, ConversationID, Recipients,
         NewState = State#monitor_state{monitors=NewMonitors},
         OutgoingRes =
           deliver_outgoing_message(ProtocolName, RoleName, ConversationID,
-                                   MessageData, IsNoErr, NewState),
+                                   MessageData, NewState),
         % Update monitors only if sending was successful
         NewState1 =
           if OutgoingRes == ok -> NewState;
@@ -488,20 +484,6 @@ handle_send_delayed_invite(ProtocolName, RoleName, ConversationID, InviteeMonito
       % Couldn't find protocol
       Err -> {reply, Err, State}
     end.
-
-monitor_and_deliver_noerr(ProtocolName, RoleName, ConvID, Msg, State) ->
-  MonitorRes = monitor_msg(recv, Msg, ProtocolName, RoleName, ConvID, State),
-  case MonitorRes of
-    {ok, NewMonitorInstance} ->
-      Monitors = State#monitor_state.monitors,
-      NewMonitors = orddict:store({ConvID, RoleName},
-                                   NewMonitorInstance, Monitors),
-      NewState = State#monitor_state{monitors=NewMonitors},
-      ActorPID = State#monitor_state.actor_pid,
-      ssa_gen_server:message(ActorPID, ProtocolName, RoleName, ConvID, Msg),
-      NewState;
-    {error, Err} -> State
-  end.
 
 monitor_and_deliver(ProtocolName, RoleName, ConvID, Msg, State) ->
   MonitorRes = monitor_msg(recv, Msg, ProtocolName, RoleName, ConvID, State),
@@ -742,7 +724,7 @@ handle_call({send_msg, CurrentProtocol, CurrentRole, ConversationID, Recipients,
              MessageName, Types, Payload}, _Sender, State) ->
   {Reply, NewState} =
     handle_outgoing_message(CurrentProtocol, CurrentRole, ConversationID, Recipients,
-                            MessageName, Types, Payload, false, State),
+                            MessageName, Types, Payload, State),
   {reply, Reply, NewState};
 handle_call({direct_deliver_msg, ProtocolName, RoleName, ConvID, Msg}, _, State) ->
   {Res, NewState} = monitor_and_deliver(ProtocolName, RoleName, ConvID, Msg, State),
@@ -823,15 +805,6 @@ handle_cast({subsession_failure, SubsessionName, InitiatorPN, InitiatorRN,
              InitiatorCID, Result}, State) ->
   handle_subsession_ended(failure, SubsessionName, InitiatorPN, InitiatorRN,
                           InitiatorCID, Result, State);
-handle_cast({direct_deliver_msg_noerr, ProtocolName, RoleName, ConvID, Msg}, State) ->
-  NewState = monitor_and_deliver_noerr(ProtocolName, RoleName, ConvID, Msg, State),
-  {noreply, NewState};
-handle_cast({send_msg_noerr, CurrentProtocol, CurrentRole, ConversationID, Recipients,
-             MessageName, Types, Payload}, State) ->
-  {_, NewState} =
-    handle_outgoing_message(CurrentProtocol, CurrentRole, ConversationID, Recipients,
-                            MessageName, Types, Payload, true, State),
-  {noreply, NewState};
 handle_cast(Other, State) ->
   %monitor_warn("Received unhandled cast message ~p.", [Other], State),
   ActorPid = State#monitor_state.actor_pid,
@@ -899,17 +872,8 @@ send_message({ProtocolName, RoleName, ConversationID, MonitorPID},
                   {send_msg, ProtocolName, RoleName, ConversationID,
                    Recipients, MessageName, Types, Payload}).
 
-send_message_noerr({ProtocolName, RoleName, ConversationID, MonitorPID},
-             Recipients, MessageName, Types, Payload) ->
-  gen_server2:cast(MonitorPID,
-                  {send_msg_noerr, ProtocolName, RoleName, ConversationID,
-                   Recipients, MessageName, Types, Payload}).
-
 direct_deliver_message(MonitorPID, ProtocolName, RoleName, ConvID, Msg) ->
   gen_server2:call(MonitorPID, {direct_deliver_msg, ProtocolName, RoleName, ConvID, Msg}).
-
-direct_deliver_message_noerr(MonitorPID, ProtocolName, RoleName, ConvID, Msg) ->
-  gen_server2:cast(MonitorPID, {direct_deliver_msg_noerr, ProtocolName, RoleName, ConvID, Msg}).
 
 queue_message(MonitorPID, ProtocolName, RoleName, ConvID, Msg) ->
   gen_server2:call(MonitorPID, {queue_msg, ProtocolName, RoleName, ConvID, Msg}).
