@@ -18,12 +18,13 @@ teardown() ->
   conversation_runtime_sup:teardown().
 
 send(ConvKey, Recipients, MessageName, Types, Payload) ->
-  Res = actor_monitor:send_message(ConvKey, Recipients, MessageName, Types,
-                                   Payload),
-  case Res of
-    ok -> ok;
-    Err -> error(Err)
-  end.
+  actor_monitor:send_message_noerr(ConvKey, Recipients, MessageName, Types, Payload).
+  %Res = actor_monitor:send_message(ConvKey, Recipients, MessageName, Types,
+  %                                 Payload),
+  %case Res of
+  %  ok -> ok;
+  %  Err -> error(Err)
+  %end.
 
 call({P, R, C, MonitorPID}, Recipient, MessageName, _, Payload) ->
   Res = actor_monitor:make_call(MonitorPID, P, R, C, Recipient,

@@ -184,7 +184,7 @@ handle_subsession_failure(SubsessionName, ProtocolName,
 % ensure that they conform to the MPST.
 handle_cast({ssa_msg, Protocol, Role, ConversationID, MsgData}, State) ->
                    % {message, _, Sender, _, Op, Types, Payload}}, State) ->
-  actor_info("Processing message ~p", [MsgData], State),
+  %actor_info("Processing message ~p", [MsgData], State),
   Sender = message:message_sender(MsgData),
   Op = message:message_name(MsgData),
   Payload = message:message_payload(MsgData),
