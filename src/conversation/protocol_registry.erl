@@ -46,7 +46,7 @@ generate_role_actor_map(ProtocolName, Config) ->
 % ProcDict: Dict of protocol processes
 spawn_child(ProtocolName, RoleDict, ProcDict, Config) ->
   RoleActorMap = generate_role_actor_map(ProtocolName, Config),
-  Result = gen_server2:start(protocol_type, [ProtocolName, RoleDict, RoleActorMap], []),
+  Result = protocol_type_sup:start_protocol_type(ProtocolName, RoleDict, RoleActorMap),
   case Result of
     {ok, Pid} -> orddict:store(ProtocolName, Pid, ProcDict);
     Error ->

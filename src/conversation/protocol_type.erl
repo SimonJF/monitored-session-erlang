@@ -191,6 +191,9 @@ code_change(_Old, State, _Extra) ->
 %%%% API
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+start_link(ProtocolName, RoleDict, RoleActorMap) ->
+  gen_server2:start_link(protocol_type, [ProtocolName, RoleDict, RoleActorMap], []).
+
 delayed_invitation(ProtocolPID, InviteeMonitorPID, RoleName, ConversationID) ->
   gen_server2:call(ProtocolPID, {delayed_invitation, InviteeMonitorPID,
                                  RoleName, ConversationID}).

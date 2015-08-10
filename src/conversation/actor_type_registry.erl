@@ -12,7 +12,7 @@ start_link(Args) ->
 
 
 spawn_child(ActorModuleName, ProtocolRoleMap, ProcDict) ->
-  Result = gen_server2:start(actor_type, [ActorModuleName, ProtocolRoleMap], []),
+  Result = actor_type_sup:start_actor_type(ActorModuleName, ProtocolRoleMap),
   case Result of
     {ok, Pid} -> orddict:store(ActorModuleName, Pid, ProcDict);
     Error ->

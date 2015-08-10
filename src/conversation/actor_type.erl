@@ -92,3 +92,5 @@ invite(PID, ProtocolName, RoleName, ConversationID) ->
   gen_server2:call(PID, {invitation, ProtocolName, RoleName,
                               ConversationID}).
 
+start_link(ActorModuleName, ProtocolRoleMap) ->
+  gen_server2:start_link(actor_type, [ActorModuleName, ProtocolRoleMap], []).
