@@ -48,30 +48,10 @@ start_conversation(MonitorPID, ProtocolName, Role) ->
   % Start a new conversation instance
   error_logger:info_msg("Starting conversation for protocol ~s.~n",
                          [ProtocolName]),
-  RoleRes = protocol_registry:get_roles(ProtocolName),
-  case RoleRes of
-    {ok, Roles} ->
-      % Next, need to start a new conversation process
-      %ConversationProc = conversation_instance:start(ProtocolName, Roles),
-      ConversationProc =
-        conversation_instance_sup:start_conversation_instance(ProtocolName, Roles),
-      case ConversationProc of
-        % And start the invitation system
-        {ok, ConvPID} ->
-          protocol_registry:start_invitation(ProtocolName, ConvPID, Role, MonitorPID);
-        Err ->
-          error_logger:error_msg("Bad conv proc result: Err ~p~n", [Err]),
-          actor_monitor:conversation_setup_failed(MonitorPID, ProtocolName,
-                                                  Role, {bad_conversation_process, Err})
-      end;
-    Err ->
-      actor_monitor:conversation_setup_failed(MonitorPID, ProtocolName, Role,
-                                              {bad_role, Err})
-  end,
+  {ok, ConversationPID} =
+    conversation_instance_sup:start_conversation_instance(ProtocolName),
+  conversation_instance:start_invitations(ConversationPID, Role, MonitorPID),
   ok.
-
-invite(ConvKey, InviteeMonitorPID, InviteeRoleName) ->
-  actor_monitor:invite(ConvKey, InviteeMonitorPID, InviteeRoleName).
 
 set_conv_property({_, _, ConvID, _}, Key, Value) ->
   conversation_instance:set_property(ConvID, Key, Value).

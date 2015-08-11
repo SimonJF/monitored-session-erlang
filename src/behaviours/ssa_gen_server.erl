@@ -71,7 +71,7 @@ actor_info(Format, Args, State) ->
 
 % gen_server2 callbacks
 init([Module, UserArgs, MonitorPID]) ->
-  actor_type_registry:register_actor_instance(Module, MonitorPID),
+  actor_registry:register_actor(Module, MonitorPID),
   UserState = Module:ssactor_init(UserArgs, MonitorPID),
   {ok, #actor_state{actor_type_name=Module,
                     monitor_pid=MonitorPID,
@@ -286,7 +286,7 @@ terminate(Reason, State) ->
   Module = State#actor_state.actor_type_name,
   MonitorPID = State#actor_state.monitor_pid,
   UserState = State#actor_state.user_state,
-  actor_type_registry:deregister_actor_instance(Module, MonitorPID),
+  actor_registry:deregister_actor(Module, MonitorPID),
   Module:terminate(Reason, UserState),
   ok.
 

@@ -512,5 +512,6 @@ evaluate_scope_inner({choice, _, ChoiceBlocks}, PrevIndex, EndIndex,
   evaluate_blocks(ChoiceBlocks, PrevIndex, EndIndex, RecMap, FSMState, MonitorState);
 evaluate_scope_inner(X = {local_initiates, _, _, _, _, _}, PrevIndex, EndIndex, RecMap,
                      FSMState, MonitorState) ->
-  evaluate_initiates(X, PrevIndex, EndIndex, RecMap, FSMState, MonitorState).
+  evaluate_initiates(X, PrevIndex, EndIndex, RecMap, FSMState, MonitorState);
+evaluate_scope_inner(_, _, _, _, _, _) -> error(bad_ast_node).
 
