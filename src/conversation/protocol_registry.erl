@@ -1,166 +1,60 @@
 -module(protocol_registry).
--behaviour(gen_server2).
+-define(PROTO_ETS_TABLE_NAME, protocol_registry_ets).
+
+-behaviour(gen_server).
 -compile(export_all).
--define(PROTOCOL_REGISTRY, ssa_protocol_registry).
 
-%%% Registry for protocol processes.
-%%% Maps protocol names to protocol processes.
+% A table mapping protocol names to [(Role, Monitor)]
 
-% Find the actors which are involved in the protocol, and devise a mapping
-% from roles to actor types.
+%%%% gen_server callbacks
+init([ProtocolMapping]) ->
+  init_ets(ProtocolMapping),
+  {ok, no_state}.
 
-% Helper function to abstract around the irritating pattern of adding to a list
-% in an orddict which may not be there
-orddict_add(Key, Val, Dict) ->
-  case orddict:find(Key, Dict) of
-    {ok, List} -> orddict:store(Key, [Val|List], Dict);
-    error -> orddict:store(Key, [Val], Dict)
-  end.
+handle_call(_, _, State) -> {stop, unexpected_call, State}.
+handle_cast(_, State) -> {stop, unexpected_cast, State}.
+handle_info(_, State) -> {noreply, State}.
+terminate(_, _) -> ok.
+code_change(_, State, _) -> {ok, State}.
 
-add_actor_to_map(ActorModuleName, RoleNames, Dict) ->
-  lists:foldl(fun(RoleName, RunningDict) ->
-                  orddict_add(RoleName, ActorModuleName, RunningDict) end,
-              Dict, RoleNames).
+% Essentially a big ol' PROTO_ETS table.
 
-generate_role_actor_map(ProtocolName, Config) ->
-  lists:foldl(fun({ActorModuleName, ProtocolMap}, Dict) ->
-                  FindRes = lists:keyfind(ProtocolName, 1, ProtocolMap),
-                  case FindRes of
-                    {ProtocolName, RoleNames} ->
-                      % Great, we've found it -- add to the dict
-                      add_actor_to_map(ActorModuleName, RoleNames, Dict);
-                    false ->
-                      %error_logger:warning_msg("Could not find protocol ~s in protocol map " ++
-                      %                          "for actor ~p.~n",
-                      %                          [ProtocolName, ActorModuleName]),
-                      Dict
-                  end end, orddict:new(), Config).
+% Populates the PROTO_ETS table.
+% ProtocolMappings: ProtocolName |-> (Role name |-> Role spec)
+populate_ets_table(ProtocolMapping) ->
+  populate_ets_table_inner(orddict:to_list(ProtocolMapping)).
+populate_ets_table_inner([]) -> ok;
+populate_ets_table_inner([{PN, RoleDict}|XS]) ->
+  Roles = lists:filtermap(fun({RoleName, RoleSpec}) ->
+                             MonitorRes = monitor:create_monitor(RoleSpec),
+                             case MonitorRes of
+                               {ok, MonitorInstance} -> {true, {RoleName, MonitorInstance}};
+                               Err ->
+                                 error_logger:warning_msg("WARN: Could not generate monitor for " ++
+                                                          "protocol ~s, role ~s -- error: ~p~n",
+                                                          [PN, RoleName, Err])
+                             end end, orddict:to_list(RoleDict)),
+  ets:insert_new(?PROTO_ETS_TABLE_NAME, {PN, Roles}),
+  populate_ets_table_inner(XS).
 
-% Spawns a child, appending the ProtocolName |-> Pid mapping
-% to the given dictionary.
-% If there's an error starting, then we ignore it for now.
-% I might revisit this later -- maybe it would be better just
-% not to start and instead Let It Fail?
-% Protocol Name: Name of the protocol
-% RoleDict: Role -> Role AST mapping
-% ProcDict: Dict of protocol processes
-spawn_child(ProtocolName, RoleDict, ProcDict, Config) ->
-  RoleActorMap = generate_role_actor_map(ProtocolName, Config),
-  Result = protocol_type_sup:start_protocol_type(ProtocolName, RoleDict, RoleActorMap),
-  case Result of
-    {ok, Pid} -> orddict:store(ProtocolName, Pid, ProcDict);
-    Error ->
-      % For now, if there's a problem starting the process, then
-      % log the error and do nothing. It might be worth retrying
-      % later on.
-      error_logger:error_msg("Error starting process for protocol ~s: ~p~n",
-                             [ProtocolName, Error]),
-      ProcDict
-  end.
+init_ets(ProtocolMapping) ->
+  % We're in the fortunate position that we only write right at the start.
+  % Afterwards, we can just blazing fast reads.
+  _TID = ets:new(?PROTO_ETS_TABLE_NAME, [named_table, {read_concurrency, true}]),
+  populate_ets_table(ProtocolMapping).
 
 
-spawn_children(ProtocolMappings, Config) ->
-  orddict:fold(fun(ProtocolName, RoleDict, ProcDict) ->
-                  spawn_child(ProtocolName, RoleDict, ProcDict, Config) end,
-              orddict:new(),
-              ProtocolMappings).
 
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%% Callbacks
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-% Spawn processes for each of the protocol names
-init([ProtocolMappings, Config]) ->
-  ProtocolRegistry = spawn_children(ProtocolMappings, Config),
-  {ok, ProtocolRegistry}.
-
-handle_call({get_process_id, ProtocolName}, _From, ProtocolRegistry) ->
-  % Try and find the protocol name in the dictionary, returning either
-  % {ok, Pid} or error
-  Result = orddict:find(ProtocolName, ProtocolRegistry),
-  {reply, Result, ProtocolRegistry};
-handle_call(Other, _From, ProtocolRegistry) ->
-  error_logger:error_msg("Unknown call message in ProtocolRegistry: ~p~n", [Other]),
-  {noreply, ProtocolRegistry}.
-
-% There shouldn't really be any async messsages?
-handle_cast(Other, ProtocolRegistry) ->
-  error_logger:error_msg("Unknown cast message in ProtocolRegistry: ~p~n", [Other]),
-  {noreply, ProtocolRegistry}.
-
-% Nor info messages
-handle_info(Other, ProtocolRegistry) ->
-  error_logger:error_msg("Unknown info message in ProtocolRegistry: ~p~n", [Other]),
-  {noreply, ProtocolRegistry}.
-
-terminate(Reason, _ProtocolRegistry) ->
-  error_logger:error_msg("ERROR: Process registry terminated, reason: ~p~n",
-                        [Reason]).
-
-% Don't need this
-code_change(_PV, ProtocolRegistry, _Ex) ->
-  {ok, ProtocolRegistry}.
-
-% Looks up a protocol name, sends a message if the protocol exists
-with_protocol_process(ProtocolName, Func) ->
-  ProtocolPidRes = get_protocol_pid(ProtocolName),
-  case ProtocolPidRes of
-    {ok, ProtocolPid} -> {ok, Func(ProtocolPid)};
-    error -> {error, bad_protocol_name} % Couldn't find the protocol process
-  end.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%% API
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-% Gets the PID of a protocol
-get_protocol_pid(ProtocolName) ->
-  gen_server2:call({global, ?PROTOCOL_REGISTRY}, {get_process_id, ProtocolName}).
+start_link(ProtocolMapping) ->
+  gen_server2:start_link(protocol_registry, [ProtocolMapping], []).
 
+get_roles_monitors(ProtocolName) ->
+  ETSRes = ets:lookup(?PROTO_ETS_TABLE_NAME, ProtocolName),
+  case ETSRes of
+    [Res] -> element(2,Res);
+    [] -> []
+  end.
 
-% Gets the monitor for a role in a given process
-get_monitor(ProtocolName, RoleName) ->
-  MonitorFunc =
-    fun (ProtocolPID) ->
-      MonitorRes = protocol_type:get_monitor(ProtocolPID, RoleName),
-      case MonitorRes of
-        {ok, Monitor} -> {ok, Monitor};
-        error -> {error, nonexistent_monitor} % Couldn't find the monitor
-      end end,
-  with_protocol_process(ProtocolName, MonitorFunc).
-
-
-get_roles(ProtocolName) ->
-  GetRoleFunc = fun (ProtocolPid) -> protocol_type:get_roles(ProtocolPid) end,
-  with_protocol_process(ProtocolName, GetRoleFunc).
-
-get_monitors(ProtocolName) ->
-  GetRoleFunc = fun (ProtocolPid) -> protocol_type:get_monitors(ProtocolPid) end,
-  with_protocol_process(ProtocolName, GetRoleFunc).
-
-
-start_invitation(ProtocolName, ConversationID, InitiatorRole, InitiatorPID) ->
-  StartInviteFunc = fun (ProtocolPID) ->
-                        protocol_type:begin_invitation(ProtocolPID, ConversationID,
-                                                       InitiatorRole, InitiatorPID)
-                    end,
-  with_protocol_process(ProtocolName, StartInviteFunc).
-
-invite_actor_direct(ProtocolName, ConversationID, RoleName, InviteeMonitorPID) ->
-  InviteDirectFunc = fun (ProtocolPID) ->
-                         protocol_type:delayed_invitation(ProtocolPID, InviteeMonitorPID,
-                                                          RoleName, ConversationID)
-                     end,
-  with_protocol_process(ProtocolName, InviteDirectFunc).
-
-invite_subset(ProtocolName, ConversationID, RoleList) ->
-  InviteSubsetFunc = fun (ProtocolPID) ->
-                         protocol_type:invite_actor_subset(ProtocolPID, ConversationID,
-                                                           RoleList)
-                     end,
-  with_protocol_process(ProtocolName, InviteSubsetFunc).
-
-start_link(Args) ->
-  gen_server2:start_link({global, ?PROTOCOL_REGISTRY}, protocol_registry, Args, []).
 

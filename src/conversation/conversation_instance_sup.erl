@@ -7,9 +7,14 @@ start_link() ->
   supervisor:start_link({global, ?CONV_SUP_PROC_NAME},
                         conversation_instance_sup, []).
 
-start_conversation_instance(ProtocolName, Roles) ->
-  supervisor:start_child({global, ?CONV_SUP_PROC_NAME}, [ProtocolName, Roles]).
+start_conversation_instance(ProtocolName) ->
+  supervisor:start_child({global, ?CONV_SUP_PROC_NAME}, [ProtocolName]).
 
+start_subsession_instance(ProtocolName, ParentConvID, InitiatorPID,
+                          InitiatorProtocol, InitiatorRole) ->
+  supervisor:start_child({global, ?CONV_SUP_PROC_NAME},
+                         [ProtocolName, ParentConvID, InitiatorPID,
+                          InitiatorProtocol, InitiatorRole]).
 init(_Args) ->
   SupTemplate = {conversation_instance,
                  {conversation_instance, start_link, []},

@@ -6,15 +6,12 @@
 -record(monitor_state, {actor_pid, % PID of the attached actor
                      actor_type_name, % Name of the attached actor type
                      active_protocols, % [{ProtocolName, RoleName, ConversationID}]
-                     protocol_role_map, % Protocol Name |-> [Role]
                      registered_become_conversations, % Atom |-> Conversation
-                     clean_monitors, % Clean monitors: (ProtocolName, RoleName) |-> Monitor
                      monitors, % (RoleName, ConversationID) |-> Monitor
                      routing_table, % ConversationID |-> [(Role, Monitor PID)]
                      queued_messages, % Message ID |-> Message
                      pending_calls, % Call ID |-> Monitor, post-send
                      pending_subsessions, % Subsession ID |-> Monitor, pre-start
-                     failure_detection_strategy, % Either push or pull
                      participant_monitor_refs % {Conv ID, Role} |-> Monitor reference
                                               % Used for push-based detection.
                     }).
@@ -24,7 +21,6 @@
 % protocol.
 % In order to do this, we need each message to carry the conversation ID.
 % active_protocols then becomes a map from protocol name |-> roles we're currently in
-% protocol_role_map becomes a map from protocol name |-> roles we can take part in
 % monitors becomes a map from (ProtocolName, RoleName, ConversationID) |-> Monitor
 
 % New workflow:
@@ -58,19 +54,16 @@ monitor_error(Format, Args, State) ->
 monitor_info(Format, Args, State) ->
   log_msg(fun error_logger:info_msg/2, Format, Args, State).
 
-fresh_state(ActorTypeName, ProtocolRoleMap, FailureDetectionStrategy) ->
+fresh_state(ActorTypeName) ->
   #monitor_state{
               actor_type_name=ActorTypeName, % Name of the attached actor type
               active_protocols=orddict:new(),
-              protocol_role_map=ProtocolRoleMap, % Roles for each protocol
               registered_become_conversations=orddict:new(),
               monitors=orddict:new(),
-              clean_monitors=orddict:new(),
               routing_table=orddict:new(),
               queued_messages=orddict:new(),
               pending_calls=orddict:new(),
               pending_subsessions=orddict:new(),
-              failure_detection_strategy=FailureDetectionStrategy,
               participant_monitor_refs=orddict:new()
              }.
 
@@ -98,15 +91,11 @@ load_protocol_monitors(ProtocolName, [Role|Roles], MonitorDict, State) ->
 
 
 init([{ActorTypeName, Args}]) ->
-  ProtocolRoleMap = actor_type_registry:get_protocol_role_map(ActorTypeName),
   % Firstly, create a fresh state with all of the information we've been given
   % Next, we load the monitors.
-  State = fresh_state(ActorTypeName, ProtocolRoleMap, pull), % TODO: Don't hardcode pull
-  MonitorDict = load_monitors(orddict:to_list(ProtocolRoleMap),
-                              orddict:new(),
-                              State),
+  State = fresh_state(ActorTypeName),
   {ok, ActorPID} = ssa_gen_server:start_actor_process(ActorTypeName, Args, self()),
-  {ok, State#monitor_state{actor_pid=ActorPID, clean_monitors=MonitorDict}}.
+  {ok, State#monitor_state{actor_pid=ActorPID}}.
 
 
 % Called when we've been invited to fufil a role.
@@ -115,54 +104,32 @@ init([{ActorTypeName, Args}]) ->
 % Returns {ok, NewState} if we can fulfil the role, or either:
 %   * {error, already_fulfilled} --> if we've already fulfilled the role
 %   * {error, cannot_fulfil} --> if this role isn't offered by the actor
-add_role(ProtocolName, RoleName, ConversationID, State) ->
-  % Firstly, check to see we're registered for the role
-  ProtocolRoleMap = State#monitor_state.protocol_role_map,
+add_role(ProtocolName, RoleName, ConversationID, Monitor, State) ->
   ActiveProtocols = State#monitor_state.active_protocols,
   Monitors = State#monitor_state.monitors,
-  FreshMonitors = State#monitor_state.clean_monitors,
   ActorPID = State#monitor_state.actor_pid,
-  % First, check whether we can fulfil the role (ie it's contained in the PRM)
-  RoleFindRes =
-    case orddict:find(ProtocolName, ProtocolRoleMap) of
-      {ok, ProtocolRoles} ->
-        list_contains(RoleName, ProtocolRoles);
-      error -> false
-    end,
-
-  FreshMonitorRes =
-    orddict:find({ProtocolName, RoleName}, FreshMonitors),
-
-    % Check to see whether we already have an entry for the protocol-role-cid
-    % triple. If not, then we can fulfil it.
-    AlreadyFulfilled =
-    lists:any(fun(ActiveTuple) ->
-                  ActiveTuple == {ProtocolName, {RoleName, ConversationID}} end,
-              orddict:to_list(ActiveProtocols)),
-
-    case {RoleFindRes, AlreadyFulfilled, FreshMonitorRes} of
-    {true, false, {ok, FreshMonitor}} ->
-      % We can theoretically fulfil it. Just need to ask the actor...
-      JoinRequestResult = ssa_gen_server:join_conversation_request(ActorPID, ProtocolName,
-                                                                   RoleName, ConversationID),
-      case JoinRequestResult of
-        accept ->
-          NewActiveProtocols = orddict:append(ProtocolName, {RoleName, ConversationID}, ActiveProtocols),
-          NewMonitors = orddict:store({ConversationID, RoleName},
-                                      FreshMonitor, Monitors),
-
-          Res = conversation_instance:accept_invitation(ConversationID, RoleName, self()),
-          case Res of
-            % Now, add the <CID, Role> |-> Monitor mapping
-            ok -> {ok, State#monitor_state{active_protocols=NewActiveProtocols,
-                                        monitors=NewMonitors}};
-            {error, Err} -> {error, Err}
-          end;
-        decline ->
-          {error, actor_declined}
-      end;
-    {_, true, _} -> {error, already_fulfilled};
-    _Other -> {error, cannot_fulfil}
+  % Check to see whether we already have an entry for the protocol-role-cid
+  % triple. If not, then we can fulfil it.
+  AlreadyFulfilled =
+  lists:any(fun(ActiveTuple) ->
+                ActiveTuple == {ProtocolName, {RoleName, ConversationID}} end,
+            orddict:to_list(ActiveProtocols)),
+  if AlreadyFulfilled -> {error, already_fulfilled};
+     not AlreadyFulfilled ->
+       JoinRequestResult =
+         ssa_gen_server:join_conversation_request(ActorPID, ProtocolName,
+                                                  RoleName, ConversationID),
+       case JoinRequestResult of
+         accept ->
+           NewActiveProtocols = orddict:append(ProtocolName,
+                                               {RoleName, ConversationID}, ActiveProtocols),
+           NewMonitors = orddict:store({ConversationID, RoleName},
+                                       Monitor, Monitors),
+           {ok, State#monitor_state{active_protocols=NewActiveProtocols,
+                                    monitors = NewMonitors}};
+         decline ->
+           {error, actor_declined}
+       end
   end.
 
 % Handle a request from the server, checking whether or not the role is needed
@@ -180,8 +147,8 @@ handle_check_participant(ConvID, RoleName, State) ->
 
 
 % Handles an invitation to fulfil a role
-handle_invitation(ProtocolName, RoleName, ConversationID, State) ->
-  AddRoleResult = add_role(ProtocolName, RoleName, ConversationID, State),
+handle_invitation(ProtocolName, RoleName, ConversationID, Monitor, State) ->
+  AddRoleResult = add_role(ProtocolName, RoleName, ConversationID, Monitor, State),
   % Try and add the role.
   % If we succeed, add the role to the conversation_roles list, set the
   % conversation ID, and transition to setup.
@@ -470,21 +437,6 @@ monitor_with(CommType, MessageData, Monitor, State) ->
   end.
 
 
-
-handle_send_delayed_invite(ProtocolName, RoleName, ConversationID, InviteeMonitorPid,
-                           State) ->
-    InviteRes = protocol_registry:invite_actor_direct(ProtocolName,
-                                                      ConversationID,
-                                                      RoleName,
-                                                      InviteeMonitorPid),
-    case InviteRes of
-      {ok, ok} -> {reply, ok, State};
-      % Found protocol, but error in invitation
-      {ok, Err} -> {reply, Err, State};
-      % Couldn't find protocol
-      Err -> {reply, Err, State}
-    end.
-
 monitor_and_deliver(ProtocolName, RoleName, ConvID, Msg, State) ->
   MonitorRes = monitor_msg(recv, Msg, ProtocolName, RoleName, ConvID, State),
   case MonitorRes of
@@ -635,50 +587,43 @@ handle_check_role_reachable(ConvID, LocalRoleName, TargetRoleName, State) ->
 % I miss monads so much
 handle_start_subsession(ConvKey, SubsessionName, InternalInvitations, ExternalInvitations, State) ->
   {InitiatorPN, InitiatorRN, InitiatorCID, _} = ConvKey,
+                     %routing_table, % ConversationID |-> [(Role, Monitor PID)]
   MonitorPID = self(),
   % Check against the initiator's monitor.
   Monitors = State#monitor_state.monitors,
+  ParentRoutingTable = orddict:fetch(InitiatorCID, State#monitor_state.routing_table),
   MonitorInstance = orddict:fetch({InitiatorCID, InitiatorRN}, Monitors),
   MonitorRes = monitor:start_subsession(SubsessionName, InternalInvitations,
                                         ExternalInvitations, MonitorInstance),
   PendingSubsessions = State#monitor_state.pending_subsessions,
   case MonitorRes of
     {ok, NewMonitorInstance} ->
-      RoleRes = protocol_registry:get_roles(SubsessionName),
-      case RoleRes of
-        {ok, RoleSpecs} ->
-          % Start the subsession
-          SubsessionProcRes = conversation_instance:start_subsession(SubsessionName, RoleSpecs,
-                                                                     InitiatorCID, MonitorPID,
-                                                                     InitiatorPN, InitiatorRN),
-          case SubsessionProcRes of
-            {ok, SubsessionPID} ->
-              % Great, store old monitor instance, start invitations, and get on
-              % with our day
-              %NewPendingSubsessions = orddict:store(SubsessionPID,
-              %                                      {ConvKey, MonitorInstance}),
-              NewPendingSubsessions = orddict:store(SubsessionPID, MonitorInstance, PendingSubsessions),
-              Monitors = State#monitor_state.monitors,
-              NewMonitors = orddict:store({InitiatorCID, InitiatorRN}, NewMonitorInstance, Monitors),
-              NewState = State#monitor_state{pending_subsessions=NewPendingSubsessions,
-                                             monitors=NewMonitors},
-              conversation_instance:start_subsession_invitations(SubsessionPID, InternalInvitations,
-                                                                 ExternalInvitations),
-              {noreply, NewState};
-            % Couldn't start the subsesion process
-            error ->
-              subsession_setup_failed(MonitorPID, SubsessionName, undefined,
-                                      InitiatorPN, InitiatorRN, InitiatorCID,
-                                      bad_subsesion_proc),
-              {noreply, State}
-          end;
-        % Couldn't find RoleSpec: bad protocol
-        _Err ->
-          subsession_setup_failed(MonitorPID, SubsessionName, undefined,
-                                  InitiatorPN, InitiatorRN, InitiatorCID,
-                                  bad_protocol),
-          {noreply, State}
-      end;
+       % Start the subsession
+       SubsessionProcRes = conversation_instance_sup:start_subsession_instance(SubsessionName,
+                                                                  InitiatorCID, MonitorPID,
+                                                                  InitiatorPN, InitiatorRN),
+       case SubsessionProcRes of
+         {ok, SubsessionPID} ->
+
+           % Great, store old monitor instance, start invitations, and get on
+           % with our day
+           %NewPendingSubsessions = orddict:store(SubsessionPID,
+           %                                      {ConvKey, MonitorInstance}),
+           NewPendingSubsessions = orddict:store(SubsessionPID, MonitorInstance, PendingSubsessions),
+           Monitors = State#monitor_state.monitors,
+           NewMonitors = orddict:store({InitiatorCID, InitiatorRN}, NewMonitorInstance, Monitors),
+           NewState = State#monitor_state{pending_subsessions=NewPendingSubsessions,
+                                          monitors=NewMonitors},
+           conversation_instance:start_subsession_invitations(SubsessionPID, InternalInvitations,
+                                                              ExternalInvitations, ParentRoutingTable),
+           {noreply, NewState};
+         % Couldn't start the subsesion process
+         error ->
+           subsession_setup_failed(MonitorPID, SubsessionName, undefined,
+                                   InitiatorPN, InitiatorRN, InitiatorCID,
+                                   bad_subsesion_proc),
+           {noreply, State}
+       end;
     % Monitor failed
     _Err ->
       subsession_setup_failed(MonitorPID, SubsessionName, undefined,
@@ -718,8 +663,8 @@ handle_subsession_ended(_SubsessionPID, _State) ->
 % Synchronous messages:
 %  * Invitation
 %  * Termination
-handle_call({invitation, ProtocolName, RoleName, ConversationID}, _Sender, State) ->
-  handle_invitation(ProtocolName, RoleName, ConversationID, State);
+handle_call({invitation, ProtocolName, RoleName, ConversationID, Monitor}, _Sender, State) ->
+  handle_invitation(ProtocolName, RoleName, ConversationID, Monitor, State);
 handle_call({send_msg, CurrentProtocol, CurrentRole, ConversationID, Recipients,
              MessageName, Types, Payload}, _Sender, State) ->
   {Reply, NewState} =
@@ -735,9 +680,6 @@ handle_call({queue_msg, ProtocolName, RoleName, ConvID, Msg}, _From, State) ->
   {reply, Res, NewState};
 handle_call({become, RoleName, RegAtom, Operation, Arguments}, _Sender, State) ->
   handle_become(RegAtom, RoleName, Operation, Arguments, State);
-handle_call({send_delayed_invite, ProtocolName, InviteeRoleName, ConversationID, InviteeMonitorPid},
-            _Sender, State) ->
-  handle_send_delayed_invite(ProtocolName, InviteeRoleName, ConversationID, InviteeMonitorPid, State);
 % Delegate directly to handle_call in monitor
 handle_call({register_become, RegAtom, ProtocolName, RoleName, ConvID}, _From, State) ->
   handle_register_conv(ProtocolName, RoleName, ConvID, RegAtom, State);
@@ -849,13 +791,8 @@ conversation_setup_failed(MonitorPID, ProtocolName, RoleName, Error) ->
 become(MonitorPID, RegAtom, RoleName, Operation, Arguments) ->
   gen_server2:call(MonitorPID, {become, RoleName, RegAtom, Operation, Arguments}).
 
-invite({ProtocolName, _, ConversationID, MonitorPID}, InviteeMonitorPID, InviteeRoleName) ->
-  gen_server2:call(MonitorPID, {send_delayed_invite, ProtocolName,
-                               InviteeRoleName, ConversationID,
-                               InviteeMonitorPID}).
-
-incoming_invitation(MonitorPID, ProtocolName, RoleName, ConversationID) ->
-  gen_server2:call(MonitorPID, {invitation, ProtocolName, RoleName, ConversationID}).
+incoming_invitation(MonitorPID, ProtocolName, RoleName, ConversationID, Monitor) ->
+  gen_server2:call(MonitorPID, {invitation, ProtocolName, RoleName, ConversationID, Monitor}).
 
 % ConvKey, ProtocolName, Internal invitations, external invitations & endpoints
 % Internal: [Role]
