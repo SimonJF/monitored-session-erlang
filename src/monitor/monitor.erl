@@ -207,6 +207,7 @@ check_transitions([Transition = {par_transition, _NextStateID, NestedFSMIDs}|TS]
     _ -> check_transitions(TS, Action, FSMState, Monitor)
   end;
 check_transitions([T|TS], Action={message, {InteractionType, Message}}, FSMState, Monitor) ->
+  error_logger:info_msg("Checking transition ~p~n", [T]),
   TransitionType = element(1, T),
   if TransitionType == InteractionType ->
        CanTakeTransition =
@@ -477,13 +478,13 @@ recv(Message, MonitorInstance) ->
   check_action({message, {recv, Message}}, MonitorInstance).
 
 send_call_request(Message, MonitorInstance) ->
-  check_action({message, {send_call_req, Message}}, MonitorInstance).
+  check_action({message, {send_call_request, Message}}, MonitorInstance).
 recv_call_request(Message, MonitorInstance) ->
-  check_action({message, {recv_call_req, Message}}, MonitorInstance).
+  check_action({message, {recv_call_request, Message}}, MonitorInstance).
 send_call_response(Message, MonitorInstance) ->
-  check_action({message, {send_call_resp, Message}}, MonitorInstance).
+  check_action({message, {send_call_response, Message}}, MonitorInstance).
 recv_call_response(Message, MonitorInstance) ->
-  check_action({message, {recv_call_resp, Message}}, MonitorInstance).
+  check_action({message, {recv_call_response, Message}}, MonitorInstance).
 
 start_subsession(SubsessionName, InternalInvitations,
                  ExternalInvitations, MonitorInstance) ->

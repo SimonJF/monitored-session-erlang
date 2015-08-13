@@ -29,8 +29,8 @@ call({P, R, C, MonitorPID}, Recipient, MessageName, _, Payload) ->
   Res = actor_monitor:make_call(MonitorPID, P, R, C, Recipient,
                                 MessageName, Payload),
   case Res of
-    ok -> ok;
-    Err -> error(Err)
+    {error, Err} -> error(Err);
+    Other -> Other
   end.
 
 % Used to transition to another role.

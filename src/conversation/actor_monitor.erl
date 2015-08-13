@@ -501,6 +501,7 @@ handle_send_call_req(ProtocolName, RoleName, ConvID, Recipient, MessageName,
               PendingCalls = State#monitor_state.pending_calls,
               NewPendingCalls = orddict:store(From, NewMonitorInstance, PendingCalls),
               NewState = State#monitor_state{pending_calls=NewPendingCalls},
+              error_logger:info_msg("Successfully sent call request~n"),
               {noreply, NewState};
             Err ->
               % It was not accepted -- return an error
@@ -530,6 +531,7 @@ handle_incoming_call_req(ProtocolName, _SenderName, ConvID, Message, From, State
 
 handle_outgoing_call_resp(ProtocolName, RoleName, ConvID, Recipient, MessageName,
                           Payload, From, State) ->
+  error_logger:info_msg("Handling outgoing call response pines~n"),
   Message = message:message(make_ref(), RoleName, [Recipient], MessageName,
                             [], Payload),
   MonitorRes = monitor_msg(send_call_resp, Message, ProtocolName, RoleName, ConvID, State),
@@ -561,7 +563,8 @@ handle_outgoing_call_resp(ProtocolName, RoleName, ConvID, Recipient, MessageName
 
 
 handle_incoming_call_resp(_ProtocolName, RoleName, ConvID, Message, From, State) ->
-  Response = message:payload(Message),
+  error_logger:info_msg("Handling incoming call response~n"),
+  Response = message:message_payload(Message),
   PendingCalls = State#monitor_state.pending_calls,
   Monitor = orddict:fetch(From, PendingCalls),
   NewPendingCalls = orddict:erase(From, PendingCalls),
@@ -841,7 +844,7 @@ outgoing_call_response(MonitorPID, ProtocolName, RoleName, ConvID, Recipient, Me
                                 Recipient, MessageName, Payload, From}).
 
 incoming_call_response(MonitorPID, ProtocolName, RoleName, ConvID, Message, From) ->
-  gen_server2:cast(MonitorPID, {incoming_call_resp, ProtocolName, RoleName, ConvID,
+  gen_server2:call(MonitorPID, {incoming_call_resp, ProtocolName, RoleName, ConvID,
                                 Message, From}).
 
 subsession_setup_failed(MonitorPID, SubsessionName, SubsessionPID, InitiatorPN,

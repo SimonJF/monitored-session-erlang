@@ -245,6 +245,7 @@ handle_cast({ssa_call_req, MonitorPID, ProtocolName, RoleName, ConversationID,
     case HandleRes of
       {reply, Reply, NewState} ->
         % Send the reply back to the caller
+        error_logger:info_msg("Sending reply back to caller~n"),
         actor_monitor:outgoing_call_response(MonitorPID, ProtocolName, RoleName,
                                              ConversationID, Sender, Op,
                                              Reply, From),

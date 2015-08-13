@@ -175,13 +175,13 @@ receive_transition(ToID, Sender, MessageName, PayloadTypes) ->
   {recv, ToID, Sender, MessageName, PayloadTypes}.
 
 send_call_request_transition(ToID, Recipient, MessageName, PayloadTypes) ->
-  {send_call_request, ToID, Recipient, MessageName, PayloadTypes}.
+  {send_call_request, ToID, [Recipient], MessageName, PayloadTypes}.
 
 receive_call_request_transition(ToID, Sender, MessageName, PayloadTypes) ->
   {recv_call_request, ToID, Sender, MessageName, PayloadTypes}.
 
 send_call_response_transition(ToID, Recipient, MessageName, PayloadTypes) ->
-  {send_call_response, ToID, Recipient, MessageName, PayloadTypes}.
+  {send_call_response, ToID, [Recipient], MessageName, PayloadTypes}.
 
 receive_call_response_transition(ToID, Sender, MessageName, PayloadTypes) ->
   {recv_call_response, ToID, Sender, MessageName, PayloadTypes}.
