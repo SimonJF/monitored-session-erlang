@@ -158,7 +158,7 @@ handle_subsession_setup_failure(SubsessionName, ProtocolName, RoleName,
   MonitorPID = State#actor_state.monitor_pid,
   ConvKey = make_conv_key(ProtocolName, RoleName, ConvID, MonitorPID),
   {ok, NewUserState} =
-    Module:handle_subsession_setup_failed(SubsessionName, Reason, UserState, ConvKey),
+    Module:ssactor_subsession_setup_failed(SubsessionName, Reason, UserState, ConvKey),
   {noreply, State#actor_state{user_state=NewUserState}}.
 
 handle_subsession_success(SubsessionName, ProtocolName, RoleName, ConvID, SubsessionResult, State) ->

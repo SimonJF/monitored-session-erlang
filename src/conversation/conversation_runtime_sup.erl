@@ -19,7 +19,7 @@ init([SpecDir, Config]) ->
                                         []},
                      permanent, brutal_kill, worker, [conversation_instance_sup]},
 
-  {ok, {{one_for_one, 2, 60}, [ConvSupProc, ProtocolRegProc, ActorRegProc]}}.
+  {ok, {{one_for_one, 1, 5}, [ConvSupProc, ProtocolRegProc, ActorRegProc]}}.
 
 start_link(SpecDir, Config) ->
   supervisor:start_link({global, ?RUNTIME_PROC_NAME},

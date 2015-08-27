@@ -48,7 +48,7 @@ monitor_participants(RoleEndpointList, State) ->
   MonitorRefList =
     lists:foldr(fun({Role, Endpoint}, Refs) ->
                     MonitorRef = erlang:monitor(process, Endpoint),
-                    [{Role, MonitorRef}|Refs] end, [], RoleEndpointList),
+                    [{MonitorRef, Role}|Refs] end, [], RoleEndpointList),
   State#conv_inst_state{participant_monitor_refs=orddict:from_list(MonitorRefList)}.
 
 % Checks whether the role is transient in the rolespec or not.
@@ -96,9 +96,20 @@ handle_get_root_pid(State) ->
        self()
   end.
 
+safety_check_reason({role_offline, _}) -> true;
+safety_check_reason(safety_check_failed) -> true;
+safety_check_reason(_) -> false.
+
 handle_end_conversation(Reason, State) ->
-  broadcast_end_notification(Reason, State),
-  exit(normal),
+  IsSubsession = State#conv_inst_state.subsession_state =/= undefined,
+  IsSafetyCheckReason = safety_check_reason(Reason),
+  if IsSubsession andalso IsSafetyCheckReason ->
+       ProtocolName = State#conv_inst_state.protocol_name,
+       handle_subsession_end(failure, "ParticipantOffline", State);
+     true ->
+       broadcast_end_notification(Reason, State),
+       exit(normal)
+  end,
   {noreply, State}.
 
 % Given an actor-role mapping, pings each actor to check if alive or dead.
@@ -197,12 +208,10 @@ handle_send_subsession_invitations(InternalRoles, ExternalInvitations, ParentRol
 
   case UnknownExternalInviteRes of
     {ok, DiscoveredSuccesses} ->
-      error_logger:info_msg("OK, DiscoveredSuccesses: ~p~n", [DiscoveredSuccesses]),
       KnownInviteRes = invite_known_actors(InvitationList, RoleMonitorMap, ProtocolName, []),
       case KnownInviteRes of
         {ok, KnownSuccesses} ->
           RoleList = DiscoveredSuccesses ++ KnownSuccesses,
-          error_logger:info_msg("Everything is good!: ~p~n", [RoleList]),
           notify_session_setup_success(ProtocolName, RoleList, orddict:from_list(RoleList)),
           NewState1 = monitor_participants(RoleList, State),
           NewState2 = NewState1#conv_inst_state{role_mapping=orddict:from_list(RoleList)},
@@ -263,7 +272,6 @@ invite_actors(InitiatorRole, InitiatorPID, State) ->
   RoleMonitorMap = protocol_registry:get_roles_monitors(ProtocolName),
   % Get the actor PIDs able to fulfil each role
   RoleActorMap = actor_registry:get_actors_for(ProtocolName),
-
   % Join the maps together. That is, [{Role, Monitor}] + [{Role, [ActorPID]}] =
   % [{Role, Monitor, [ActorPID]}].
   JoinedMapRes = join_maps(RoleMonitorMap, RoleActorMap),

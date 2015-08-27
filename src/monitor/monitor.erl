@@ -207,7 +207,6 @@ check_transitions([Transition = {par_transition, _NextStateID, NestedFSMIDs}|TS]
     _ -> check_transitions(TS, Action, FSMState, Monitor)
   end;
 check_transitions([T|TS], Action={message, {InteractionType, Message}}, FSMState, Monitor) ->
-  error_logger:info_msg("Checking transition ~p~n", [T]),
   TransitionType = element(1, T),
   if TransitionType == InteractionType ->
        CanTakeTransition =

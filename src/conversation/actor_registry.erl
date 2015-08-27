@@ -16,7 +16,6 @@
 %%%% gen_server callbacks
 %%% Config : Actor |-> [{Protocol, [Role]}]
 init([Config]) ->
-  io:format("Config: ~p~n", [Config]),
   init_ets(),
   {ok, orddict:from_list(expand_config(Config))}.
 
@@ -32,9 +31,7 @@ code_change(_, State, _) -> {ok, State}.
 
 % [{Actor, [{Protocol, [Role]}]}] -> [{Actor, [{Protocol, Role}]}]
 expand_config(Config) ->
-  io:format("Config: ~p~n", [Config]),
   lists:map(fun({Actor, Mapping}) ->
-                io:format("Actor: ~p, Mapping: ~p~n", [Actor, Mapping]),
                 {Actor, expand_mapping(Mapping)} end,
             Config).
 % [{Protocol, [Role]}] -> [{Protocol, Role}]
@@ -74,7 +71,6 @@ register_inner([{P, R}|XS], ActorName, ActorPID) ->
   register_inner(XS, ActorName, ActorPID).
 
 handle_register_actor(ActorType, ActorPID, Config) ->
-  error_logger:info_msg("HRA: Config: ~p~n", [Config]),
   case orddict:find(ActorType, Config) of
     {ok, Mappings} ->
       % Mappings: [{Protocol, Role}]
