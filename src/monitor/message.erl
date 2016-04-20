@@ -11,15 +11,20 @@
 
 % A representation of a message which has been sent.
 
-
-message(Id, SenderRole, RecipientRoles, MessageName, PayloadTypes, Payload) ->
+message(ID, SenderRole, RecipientRoles, MessageName, PayloadTypes, Payload) ->
+  add_message_id(message(SenderRole, RecipientRoles, MessageName,
+                         PayloadTypes, Payload), ID).
+message(SenderRole, RecipientRoles, MessageName, PayloadTypes, Payload) ->
   #message_record{
-           message_id=Id,
+           message_id=undefined,
            message_sender_role=SenderRole,
            message_recipient_roles=RecipientRoles,
            message_name=MessageName,
            message_payload_types=PayloadTypes,
            message_payload=Payload}.
+
+add_message_id(Msg, MsgID) ->
+  Msg#message_record{message_id=MsgID}.
 
 message_id(Msg) -> Msg#message_record.message_id.
 message_sender(Msg) -> Msg#message_record.message_sender_role.

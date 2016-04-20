@@ -220,7 +220,6 @@ deliver_incoming_message(Protocol, Role, ConvID, Msg, State) ->
 %deliver_outgoing_message(Msg, ProtocolName, RoleName, ConversationID) ->
   %gen_server2:call(ConversationID, {outgoing_msg, ProtocolName, RoleName, Msg}).
 
-
 % Dispatch messages to each actor.
 % Return a tuple of four things:
 %   * OkNodes: Nodes for which the message was successfully delivered
@@ -228,56 +227,78 @@ deliver_incoming_message(Protocol, Role, ConvID, Msg, State) ->
 %   * RejectedNodes: Nodes for which the monitor rejected the message
 %   * NotFoundNodes: Nodes which were not found in the role map.
 % return: [{AliveNodeEndpoints, DeadNodes, RejectedNodes, NotFoundNodes}]
-deliver_messages(Roles, RoleMap, P, R, C, Msg) ->
-  deliver_messages_inner(Roles, RoleMap, P, R, C, Msg, {[], [], [], []}).
-deliver_messages_inner([], _RoleMap, _, _, _, _, Res) -> Res;
-deliver_messages_inner([Role|Roles], RoleMap, Protocol, RoleName, ConvID, Msg, {Ok, D, R, NF}) ->
+deliver_messages(Roles, RoleMap, P, R, C, Msg, State) ->
+  deliver_messages_inner(Roles, RoleMap, P, R, C, Msg, {[], [], [], []}, State).
+deliver_messages_inner([], _RoleMap, _, _, _, _, Res, State) -> {Res, State};
+deliver_messages_inner([Role|Roles], RoleMap, Protocol, RoleName, ConvID, Msg_NoID, {Ok, D, R, NF}, State) ->
+  MessageID = make_ref(),
+  Msg = message:add_message_id(Msg_NoID, MessageID),
   case orddict:find(Role, RoleMap) of
     {ok, Endpoint} ->
       % TODO: Reflexive sending will deadlock here.
       % Instead of sending to ourselves, we could probably emulate it and return
       % an updated state, while adding the message to the queue, ready for the
       % commit cast later on.
-      try actor_monitor:queue_message(Endpoint, Protocol, Role, ConvID, Msg) of
-        ok ->
-          % Delivered successfully, add to Ok list
-          deliver_messages_inner(Roles, RoleMap, Protocol, RoleName, ConvID,
-                            Msg, {[Endpoint|Ok], D, R, NF});
-        {error, _Err} ->
-          % Node alive, but monitor rejected message, add to rejected list
-          deliver_messages_inner(Roles, RoleMap, Protocol, RoleName, ConvID,
-                            Msg, {Ok, D, [Role|R], NF})
-      catch
-        _:Err ->
-          %io:format("Error in queue message call: ~p~n", [Err]),
-          % Actor offline, add to Dead list
-          deliver_messages_inner(Roles, RoleMap, Protocol, RoleName, ConvID,
-                            Msg, {Ok, [Role|D], R, NF})
+      if (Endpoint == self()) ->
+           io:format("Performing reflexive send in ~p of msg ~p~n", [Role, Msg]),
+           case monitor_and_queue(Protocol, Role, ConvID, Msg, State) of
+             {ok, NewState} ->
+               deliver_messages_inner(Roles, RoleMap, Protocol, RoleName,
+                                      ConvID, Msg, {[{Endpoint, MessageID}|Ok],
+                                                    D, R, NF}, NewState);
+             {{error, _Err}, _} ->
+               deliver_messages_inner(Roles, RoleMap, Protocol, RoleName, ConvID,
+                                     Msg, {Ok, D, [Role|R], NF}, State)
+           end;
+         (Endpoint =/= self()) ->
+            try actor_monitor:queue_message(Endpoint, Protocol, Role, ConvID, Msg) of
+              ok ->
+                % Delivered successfully, add to Ok list
+                deliver_messages_inner(Roles, RoleMap, Protocol, RoleName, ConvID,
+                                  Msg, {[{Endpoint, MessageID}|Ok], D, R, NF}, State);
+              {error, _Err} ->
+                % Node alive, but monitor rejected message, add to rejected list
+                deliver_messages_inner(Roles, RoleMap, Protocol, RoleName, ConvID,
+                                  Msg, {Ok, D, [Role|R], NF}, State)
+            catch
+              _:Err ->
+                %io:format("Error in queue message call: ~p~n", [Err]),
+                % Actor offline, add to Dead list
+                deliver_messages_inner(Roles, RoleMap, Protocol, RoleName, ConvID,
+                                  Msg, {Ok, [Role|D], R, NF}, State)
+            end
       end;
     error ->
       % Role not found -- user entered it incorrectly. Add to not found
       deliver_messages_inner(Role, RoleMap, Protocol, RoleName, ConvID,
-                        Msg, {Ok, D, R, [Role|NF]})
+                        Msg, {Ok, D, R, [Role|NF]}, State)
   end.
 
 % Commit a message to a set of endpoints
-commit_outgoing_messages([], _) -> ok;
-commit_outgoing_messages([EP|EPs], Msg) ->
-  actor_monitor:commit_message(EP, message:message_id(Msg)),
-  commit_outgoing_messages(EPs, Msg).
+commit_outgoing_messages([]) -> ok;
+commit_outgoing_messages([{EP, MessageID}|EPs]) ->
+  actor_monitor:commit_message(EP, MessageID),
+  commit_outgoing_messages(EPs).
 
 % Drop a message from a set of endpoints
-drop_outgoing_messages([], _) -> ok;
-drop_outgoing_messages([EP|EPs], Msg) ->
-  actor_monitor:drop_message(EP, message:message_id(Msg)),
-  drop_outgoing_messages(EPs, Msg).
+drop_outgoing_messages([]) -> ok;
+drop_outgoing_messages([{EP, MessageID}|EPs]) ->
+  actor_monitor:drop_message(EP, MessageID),
+  drop_outgoing_messages(EPs).
 
-
+%monitor_and_deliver(ProtocolName, RoleName, ConvID, Msg, State) ->
 direct_deliver_outgoing_message(Recipient, ConvRoutingTable, ProtocolName,
-                                ConvID, Msg) ->
+                                ConvID, Msg, State) ->
   case orddict:find(Recipient, ConvRoutingTable) of
     {ok, Endpoint} ->
-      actor_monitor:direct_deliver_message(Endpoint, ProtocolName, Recipient, ConvID, Msg);
+      if (Endpoint == self()) ->
+        monitor_and_deliver(ProtocolName, Recipient, ConvID, Msg, State);
+      (Endpoint =/= self()) ->
+        Res =
+          actor_monitor:direct_deliver_message(Endpoint, ProtocolName,
+                                               Recipient, ConvID, Msg),
+         {Res, State}
+      end;
     error -> {error, {nonexistent_role, Recipient}}
   end.
 
@@ -293,23 +314,22 @@ deliver_outgoing_message(ProtocolName, RoleName, ConvID, Msg, State) ->
   if RecipientLength == 1 ->
        [Recipient] = Recipients,
        direct_deliver_outgoing_message(Recipient, ConvRoutingTable, ProtocolName,
-                                       ConvID, Msg);
+                                       ConvID, Msg, State);
      RecipientLength =/= 1 ->
        MonitorAndQueueRes = deliver_messages(Recipients, ConvRoutingTable,
-                                             ProtocolName, RoleName, ConvID, Msg),
+                                             ProtocolName, RoleName, ConvID, Msg, State),
        case MonitorAndQueueRes of
-         {OkEndpoints, [], [], []} ->
+         {{OkEndpoints, [], [], []}, NewState} ->
            % Everything was successful
-           commit_outgoing_messages(OkEndpoints, Msg),
-           ok;
-         {OkEndpoints, D, R, NF} ->
-           drop_outgoing_messages(OkEndpoints, Msg),
-           {error, {queue_failed, D, R, NF}}
+           commit_outgoing_messages(OkEndpoints),
+           {ok, NewState};
+         {{OkEndpoints, D, R, NF}, NewState} ->
+           drop_outgoing_messages(OkEndpoints),
+           {{error, {queue_failed, D, R, NF}}, NewState}
        end
   end.
 
 
-% Handles an incoming message. Checks whether we're in the correct conversation,
 % then grabs the monitor, then checks / updates the monitor state.
 handle_incoming_message(MessageData, ProtocolName, RoleName, ConversationID,
                         State) ->
@@ -390,12 +410,12 @@ handle_outgoing_message(ProtocolName, RoleName, ConversationID, Recipients,
                                     NewMonitorInstance,
                                     Monitors),
         NewState = State#monitor_state{monitors=NewMonitors},
-        OutgoingRes =
+        {OutgoingRes, NewState1}  =
           deliver_outgoing_message(ProtocolName, RoleName, ConversationID,
                                    MessageData, NewState),
         % Update monitors only if sending was successful
-        NewState1 =
-          if OutgoingRes == ok -> NewState;
+        NewState2 =
+          if OutgoingRes == ok -> NewState1;
              OutgoingRes =/= ok -> State
           end,
 
@@ -403,7 +423,7 @@ handle_outgoing_message(ProtocolName, RoleName, ConversationID, Recipients,
              handle_send_failed(ConversationID, RoleName, State);
            OutgoingRes == ok -> ok
         end,
-        {OutgoingRes, NewState1};
+        {OutgoingRes, NewState2};
       Err ->
         {Err, State}
   end.
