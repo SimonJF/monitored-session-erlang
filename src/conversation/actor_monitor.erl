@@ -235,10 +235,6 @@ deliver_messages_inner([Role|Roles], RoleMap, Protocol, RoleName, ConvID, Msg_No
   Msg = message:add_message_id(Msg_NoID, MessageID),
   case orddict:find(Role, RoleMap) of
     {ok, Endpoint} ->
-      % TODO: Reflexive sending will deadlock here.
-      % Instead of sending to ourselves, we could probably emulate it and return
-      % an updated state, while adding the message to the queue, ready for the
-      % commit cast later on.
       if (Endpoint == self()) ->
            io:format("Performing reflexive send in ~p of msg ~p~n", [Role, Msg]),
            case monitor_and_queue(Protocol, Role, ConvID, Msg, State) of

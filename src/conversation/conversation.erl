@@ -17,6 +17,9 @@ initialise(SpecDir, Config) ->
 teardown() ->
   conversation_runtime_sup:teardown().
 
+send(ConvKey, Recipients, MessageName, Payload) ->
+  send(ConvKey, Recipients, MessageName, [], Payload).
+
 send(ConvKey, Recipients, MessageName, Types, Payload) ->
   Res = actor_monitor:send_message(ConvKey, Recipients, MessageName, Types,
                                    Payload),
