@@ -190,5 +190,22 @@ local_initiates(InitiatorRole, SubsessionName, RoleInstantiationList,
   {local_initiates, InitiatorRole, SubsessionName, RoleInstantiationList,
    SuccessBlock, HandleBlocks}.
 
+% Initiates where we assume session completes successfully, success block
+% is implicitly the continuation.
+% As an example, we have
+%   X() from A to B;
+%   A initiates OtherProtocol(A, B, new C);
+%   Y() from B to A;
+%   ...
+%
+% instead of
+%
+%  X() from A to B;
+%  A initiates OtherProtocol(A, B, new C) {
+%    Y() from B to A;;
+%  }
+local_initiates_one(InitiatorRole, SubsessionName, RoleInstantiationList) ->
+  {local_initiates_one, InitiatorRole, SubsessionName, RoleInstantiationList}.
+
 handle_block(FailureName, Block) ->
   {handle_block, FailureName, Block}.

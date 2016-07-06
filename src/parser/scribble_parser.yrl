@@ -83,6 +83,7 @@ localrecvcallreq
 localsendcallresp
 localrecvcallresp
 localinitiates
+localinitiatesone
 handleblock
 handleblocks.
 
@@ -355,10 +356,14 @@ localinteraction -> localrecvcallreq : '$1'.
 localinteraction -> localsendcallresp : '$1'.
 localinteraction -> localrecvcallresp : '$1'.
 localinteraction -> localinvites : '$1'.
+localinteraction -> localinitiatesone : '$1'.
 localinteraction -> localinitiates : '$1'.
 
 localinitiates -> identifier initiates_kw identifier roleinstantiationlist localprotocolblock handleblocks:
   scribble_ast:local_initiates('$1', '$3', '$4', '$5', '$6').
+
+localinitiatesone -> identifier initiates_kw identifier roleinstantiationlist semicolon :
+  scribble_ast:local_initiates_one('$1', '$3', '$4').
 
 handleblocks -> empty : [].
 handleblocks -> handleblock handleblocks : ['$1'|'$2'].

@@ -276,7 +276,8 @@ subsession_test1_test() ->
   {ok, MonitorInstance1} = monitor:start_subsession("PerformBooking", ["TravelAgent", "Customer"],
                                                     ["FlightBookingService", "HotelBookingService"], MonitorInstance),
   {ok, MonitorInstance2} = monitor:subsession_success(MonitorInstance1),
-  {ok, MonitorInstance3} = monitor:start_subsession("PerformPayment", ["TravelAgent", "PaymentProcessor"], [], MonitorInstance2),
+  io:format("MonitorInstance2: ~p~n", [MonitorInstance2]),
+  {ok, MonitorInstance3} = monitor:start_subsession("PerformPayment", ["TravelAgent"], ["PaymentProcessor"], MonitorInstance2),
   {ok, MonitorInstance4} = monitor:subsession_success(MonitorInstance3),
   Msg1 = message:message(0, "TravelAgent", ["Customer"], "confirmation", [], []),
   {ok, MonitorInstance5} = monitor:send(Msg1, MonitorInstance4),
@@ -305,6 +306,21 @@ subsession_bad2_test() ->
   {ok, MonitorInstance} = subsession_test_setup(),
   {error, _} = monitor:start_subsession("PerformBooking", ["Customer"],
                                         ["TravelBooking", "FlightBookingService", "HotelBookingService"], MonitorInstance).
+
+
+% Subsession where we assume success, therefore don't have explicit success block
+subsession_initiates1_test() ->
+  Filename = ?SPEC_DIRECTORY ++ "SubsessionInitiates1Test_A.scr",
+  ProtocolName = "SubsessionInitiates1Test",
+  RoleName = "A",
+  {ok, MonitorInstance} = monitor:create_monitor(Filename, ProtocolName, RoleName),
+  Msg1 = message:message(0, "A", ["B"], "X", [], []),
+  {ok, MonitorInstance1} = monitor:send(Msg1, MonitorInstance),
+  {ok, MonitorInstance2} = monitor:start_subsession("Subsession", ["A", "B"], ["C"], MonitorInstance1),
+  {ok, MonitorInstance3} = monitor:subsession_success(MonitorInstance2),
+  Msg2 = message:message(0, "A", ["B"], "Y", [], []),
+  {ok, MonitorInstance4} = monitor:send(Msg2, MonitorInstance3),
+  ?assert(monitor:is_ended(MonitorInstance4)).
 
 
 rec_reachability_test1_test() ->

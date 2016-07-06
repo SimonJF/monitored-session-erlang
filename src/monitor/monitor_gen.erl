@@ -224,6 +224,7 @@ block_size([X|XS]) ->
 
 instruction_size({rec, _, Block}) ->
   block_size(Block);
+instruction_size({local_initiates_one, _, _, _}) -> 1;
 instruction_size({local_initiates, _, SN, _, SuccessBlock, HandleBlocks}) ->
   HandleBlocksSize = lists:foldl(fun(HB = {handle_block, _, Block}, Sum) ->
                                      Sum + initiates_size(Block) end, 0, HandleBlocks),
@@ -320,14 +321,6 @@ is_list_empty(_) -> false.
 evaluate_transition(X, [{continue, RecName}|_], PrevID, _EndIndex,
                     RecMap, FSMState, MonitorState) ->
   evaluate_rec_transition(X, PrevID, RecName, RecMap, FSMState, MonitorState);
-%evaluate_transition(X, [{par, ParallelBlocks}|XS], PrevID, EndIndex, RecMap, FSMState,
-%                    MonitorState) ->
-%  RunningID = get_running_id(FSMState),
-%
-%  {MonitorState1, NestedFSMIDs} = evaluate_parallel_blocks(ParallelBlocks,
-%                                                           MonitorState, RecMap),
-%  FSMState1 = evaluate_comm_transition(X, PrevID, par_state(NestedFSMIDs), FSMState),
-%  evaluate_block(XS, RunningID, EndIndex, RecMap, FSMState1, MonitorState1);
 evaluate_transition(X, XS, PrevID, EndIndex, RecMap, FSMState, MonitorState) ->
   RunningID = get_running_id(FSMState),
   {FSMState1, MonitorState1} =
@@ -363,6 +356,20 @@ evaluate_block([], _PrevIndex, _EndIndex, _RecMap, FSMState, MonitorState) ->
 % evaluate_block([{par, _}|_], _, _, _, _, _) -> error(eval_par);
 evaluate_block([{continue, _}|_], _, _, _, FSMState, MonitorState) ->
   {FSMState, MonitorState};
+evaluate_block([{local_initiates_one, _Role, SN, RIL}|XS], PrevIndex, EndIndex,
+               RecMap, FSMState, MonitorState) ->
+  % Add start transition, then success transition to end ID
+  StateID1 = get_running_id(FSMState),
+  FSMState1 = add_state(standard_state, FSMState),
+  StartSubsessionTransition = start_subsession_transition(StateID1, SN, RIL),
+  FSMState2 = add_transition(PrevIndex, StartSubsessionTransition, FSMState1),
+  % Success transition to next ID
+  FSMState3 =
+    add_subsession_success_transition(XS, RecMap, StateID1, EndIndex, FSMState2),
+  % Now, we'll want the previous state (which is running ID of FSMState2)
+  PrevIndex1 = get_running_id(FSMState2),
+  evaluate_block(XS, PrevIndex1, EndIndex, RecMap, FSMState3, MonitorState);
+  %{FSMState3, MonitorState};
 evaluate_block([X], PrevIndex, EndIndex, RecMap, FSMState, MonitorState) ->
   IsCommAction = is_comm_action(X),
   if IsCommAction ->
@@ -454,7 +461,7 @@ add_subsession_failure_transition(FailureName, _, _, PrevIndex, _, FSMState) ->
 add_subsession_success_transition([], _, PrevIndex, EndIndex, FSMState) ->
   Transition = subsession_success_transition(EndIndex),
   add_transition(PrevIndex, Transition, FSMState);
-add_subsession_success_transition([{continue, RecName}|_], RecMap, PrevIndex, _, FSMState) ->
+add_subsession_success_transition([{continue, RecName}|_], RecMap, PrevIndex, _EndIndex, FSMState) ->
   IDRes = orddict:find(RecName, RecMap),
   case IDRes of
     {ok, ID} ->
