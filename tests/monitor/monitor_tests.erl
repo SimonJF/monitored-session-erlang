@@ -276,7 +276,6 @@ subsession_test1_test() ->
   {ok, MonitorInstance1} = monitor:start_subsession("PerformBooking", ["TravelAgent", "Customer"],
                                                     ["FlightBookingService", "HotelBookingService"], MonitorInstance),
   {ok, MonitorInstance2} = monitor:subsession_success(MonitorInstance1),
-  io:format("MonitorInstance2: ~p~n", [MonitorInstance2]),
   {ok, MonitorInstance3} = monitor:start_subsession("PerformPayment", ["TravelAgent"], ["PaymentProcessor"], MonitorInstance2),
   {ok, MonitorInstance4} = monitor:subsession_success(MonitorInstance3),
   Msg1 = message:message(0, "TravelAgent", ["Customer"], "confirmation", [], []),
